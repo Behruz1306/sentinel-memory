@@ -1,0 +1,15 @@
+# Sentinel — Retrieval Firewall + AI Red Team
+# Core (required)
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+python-dotenv>=1.0
+
+# LLM (optional — engine has a deterministic fallback if absent / no key)
+openai>=1.0
+
+# Voice agent (optional — added last; demo works without it)
+# livekit-agents>=1.3.0,<1.4.0
+# livekit-plugins-openai>=1.3.0,<1.4.0
+# livekit-plugins-deepgram>=1.3.0,<1.4.0
+# livekit-plugins-silero>=1.3.0,<1.4.0
