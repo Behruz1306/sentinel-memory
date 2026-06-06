@@ -1,15 +1,23 @@
-# Sentinel — Retrieval Firewall + AI Red Team
-# Core (required)
+# Sentinel Memory — secure, predictive, trust-aware retrieval middleware
+# Core (required) — the full pipeline + demo run on these alone.
 fastapi>=0.110
 uvicorn[standard]>=0.29
 pydantic>=2.6
 python-dotenv>=1.0
 
-# LLM (optional — engine has a deterministic fallback if absent / no key)
+# --- Optional integrations (everything degrades gracefully if absent) -------
+
+# LLM for social-engineering reasoning + embeddings.
+# Works for OpenAI AND MiniMax (MiniMax exposes an OpenAI-compatible endpoint;
+# set SENTINEL_LLM_PROVIDER=minimax + MINIMAX_API_KEY). Also fits TrueFoundry /
+# Bedrock gateways via SENTINEL_LLM_BASE_URL.
 openai>=1.0
 
-# Voice agent (optional — added last; demo works without it)
+# AWS CloudWatch breach logging (falls back to local security_events.jsonl).
+boto3>=1.34
+
+# Voice transport — LiveKit Agents 1.3.x (the demo also runs fully offline via
+# stream_simulator / demo_call.py, so these are optional).
 # livekit-agents>=1.3.0,<1.4.0
-# livekit-plugins-openai>=1.3.0,<1.4.0
 # livekit-plugins-deepgram>=1.3.0,<1.4.0
 # livekit-plugins-silero>=1.3.0,<1.4.0

@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
 """Sentinel API + live dashboard.
 
-    uvicorn server:app --reload --port 8000
+    uvicorn server:app --port 8000
     open http://localhost:8000
-
-Endpoints:
-    GET  /                 -> the live Co-Pilot dashboard
-    POST /api/evaluate     -> run one retrieval request through the firewall
-    POST /api/redteam      -> run the full attack campaign
-    GET  /api/scenarios    -> preset live-demo scenarios
 """
 
 from __future__ import annotations
 
 import os
+from typing import Optional
 
 try:
     from dotenv import load_dotenv
@@ -26,22 +21,34 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from sentinel.firewall import RetrievalFirewall, RetrievalRequest
-from sentinel.llm import llm_available
-from sentinel.redteam import ATTACKS, run_campaign
+from src.core import llm
+from src.core.cloudwatch import security_log
+from src.core.graph_kb import KnowledgeGraph
+from src.core.retrieval import SentinelRetriever
+from src.core.session import SessionState
+from src.middleware.stream_simulator import CALLS, get_call, play
+from src.middleware.pipeline import SentinelPipeline
+from src.red_team.simulator import run_campaign
 
-app = FastAPI(title="Sentinel", version="0.1.0")
-fw = RetrievalFirewall()
+app = FastAPI(title="Sentinel Memory", version="0.2.0")
+
+_kb = KnowledgeGraph()
+_retriever = SentinelRetriever(_kb)
+_pipeline = SentinelPipeline(_kb)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
 class EvalBody(BaseModel):
     query: str
-    claimed_identity: str = "unknown"
+    claimed_identity: str = "guest"
     verification: str = "claimed_only"
+    origin: str = "unknown"
+    origin_ip: str = "0.0.0.0"
+    voice_anomaly: float = 0.0
     transcript: str = ""
     intent: str = "read"
+    verified_user_id: Optional[str] = None
 
 
 @app.get("/")
@@ -51,37 +58,76 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "llm": llm_available()}
+    return {
+        "ok": True,
+        "llm": llm.llm_info(),
+        "breach_sink": security_log.sink,
+        "kb": _kb.stats(),
+    }
 
 
 @app.post("/api/evaluate")
 def evaluate(body: EvalBody):
-    decision = fw.evaluate(RetrievalRequest(**body.model_dump()))
-    return decision.to_dict()
+    s = SessionState(
+        session_id="api", caller_id="api-caller",
+        claimed_identity=body.claimed_identity, verification=body.verification,
+        origin=body.origin, origin_ip=body.origin_ip,
+        voice_anomaly=body.voice_anomaly, verified_user_id=body.verified_user_id,
+    )
+    if body.transcript:
+        s.commit_final(body.transcript)
+    result = _retriever.execute(s, body.query, intent=body.intent, raise_on_deny=False)
+    return result.to_dict()
+
+
+@app.post("/api/simulate/{call_id}")
+def simulate(call_id: str):
+    """Run a scripted call through the pipeline; return the play-by-play."""
+    call = get_call(call_id)
+    if not call:
+        return {"error": f"unknown call '{call_id}'"}
+    events = []
+    play(call, SentinelPipeline(_kb), on_event=lambda k, p: events.append(_ev(k, p)))
+    return {"call": call.id, "title": call.title, "events": events}
+
+
+def _ev(kind, payload):
+    if kind == "interim":
+        return {"kind": "interim", "heard": payload["heard"],
+                "prefetched": payload["prefetched"]}
+    turn = payload["turn"]
+    return {"kind": "final", "decision": turn.decision, "denied": turn.denied,
+            "result": turn.result}
 
 
 @app.post("/api/redteam")
 def redteam():
-    return run_campaign(fw)
+    camp = run_campaign()
+    return {
+        "total": camp["total"], "defended": camp["defended"],
+        "breached": camp["breached"], "defense_rate": camp["defense_rate"],
+        "results": [
+            {
+                "id": r.attack.id, "name": r.attack.name,
+                "attack_type": r.attack.attack_type,
+                "target_sensitivity": r.attack.target_sensitivity,
+                "status": r.status, "trust_score": r.trust_score,
+                "se_risk": r.se_risk, "priority": r.priority, "detail": r.detail,
+            }
+            for r in camp["results"]
+        ],
+    }
 
 
 @app.get("/api/scenarios")
 def scenarios():
-    return {
-        "scenarios": [
-            {
-                "id": a.id,
-                "name": a.name,
-                "category": a.category,
-                "query": a.request.query,
-                "claimed_identity": a.request.claimed_identity,
-                "verification": a.request.verification,
-                "transcript": a.request.transcript,
-                "intent": a.request.intent,
-            }
-            for a in ATTACKS
-        ]
-    }
+    return {"scenarios": [
+        {"id": c.id, "name": c.title, "claimed_identity": c.claimed_identity,
+         "verification": c.verification, "origin": c.origin,
+         "voice_anomaly": c.voice_anomaly, "transcript": c.final,
+         "query": c.final, "intent": c.intent, "notes": c.notes}
+        for c in CALLS
+    ]}
 
 
 if os.path.isdir(STATIC_DIR):

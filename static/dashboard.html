@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Sentinel — Retrieval Firewall for AI Agents</title>
+<title>Sentinel Memory — Retrieval Firewall for AI Agents</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   body { background: radial-gradient(1200px 600px at 80% -10%, #1b2440 0%, #0b0f1a 55%); }
@@ -12,102 +12,112 @@
   @keyframes pulse { 0%,100%{opacity:.5} 50%{opacity:1} }
   .live { animation: pulse 1.4s ease-in-out infinite; }
   .gauge { transition: width .6s cubic-bezier(.2,.8,.2,1); }
+  input[type=range]{accent-color:#a78bfa}
 </style>
 </head>
 <body class="text-slate-200 min-h-screen">
 <div class="max-w-6xl mx-auto px-6 py-8">
 
-  <!-- header -->
   <header class="flex items-center justify-between mb-8">
     <div class="flex items-center gap-3">
       <div class="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-400 to-violet-600 grid place-items-center font-bold text-white text-lg">S</div>
       <div>
-        <h1 class="text-xl font-semibold tracking-tight">Sentinel</h1>
-        <p class="text-xs text-slate-400 -mt-0.5">Retrieval Firewall for AI Agents</p>
+        <h1 class="text-xl font-semibold tracking-tight">Sentinel Memory</h1>
+        <p class="text-xs text-slate-400 -mt-0.5">Secure · Predictive · Trust-aware retrieval middleware</p>
       </div>
     </div>
-    <div class="flex items-center gap-4 text-xs text-slate-400">
+    <div class="flex items-center gap-3 text-xs text-slate-400">
       <span id="llm-mode" class="px-2.5 py-1 rounded-full glass"></span>
+      <span id="sink" class="px-2.5 py-1 rounded-full glass"></span>
       <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-emerald-400 live"></span>live</span>
     </div>
   </header>
 
   <div class="grid md:grid-cols-2 gap-5">
-
-    <!-- LEFT: the call / request -->
+    <!-- LEFT: session + request -->
     <section class="glass rounded-2xl p-5">
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-sm font-semibold text-slate-300">Incoming request → AI agent</h2>
-        <select id="scenario" class="bg-slate-800/70 border border-white/10 rounded-lg text-xs px-2 py-1"></select>
+        <h2 class="text-sm font-semibold text-slate-300">Voice session → AI agent</h2>
+        <select id="scenario" class="bg-slate-800/70 border border-white/10 rounded-lg text-xs px-2 py-1 max-w-[55%]"></select>
       </div>
 
-      <label class="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">Claimed identity</label>
-      <div class="flex gap-2 mb-3">
-        <select id="identity" class="flex-1 bg-slate-800/70 border border-white/10 rounded-lg text-sm px-3 py-2">
-          <option value="ceo">CEO (Mark Diaz)</option>
-          <option value="finance_director">Finance Director (Sarah Chen)</option>
-          <option value="ops">Operations (John Reyes)</option>
-          <option value="employee">Employee</option>
-          <option value="vendor">Vendor</option>
-          <option value="unknown" selected>Unknown caller</option>
-        </select>
-        <select id="verification" class="flex-1 bg-slate-800/70 border border-white/10 rounded-lg text-sm px-3 py-2">
-          <option value="cryptographic">verified: crypto/SSO</option>
-          <option value="callback_on_file">verified: callback-on-file</option>
-          <option value="internal_session">verified: app session</option>
-          <option value="voice_known">voice recognized</option>
-          <option value="claimed_only" selected>claimed only ☎</option>
-          <option value="spoofed_channel">spoofed channel</option>
-        </select>
+      <div class="grid grid-cols-2 gap-2 mb-3">
+        <div>
+          <label class="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">Claims identity</label>
+          <select id="identity" class="w-full bg-slate-800/70 border border-white/10 rounded-lg text-sm px-2 py-2">
+            <option value="ceo">CEO (Mark)</option><option value="finance">Finance Dir (Sarah)</option>
+            <option value="ops">Operations (John)</option><option value="employee">Employee</option>
+            <option value="vendor">Vendor</option><option value="guest" selected>Unknown / Guest</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">Verification</label>
+          <select id="verification" class="w-full bg-slate-800/70 border border-white/10 rounded-lg text-sm px-2 py-2">
+            <option value="cryptographic">crypto / SSO</option><option value="callback_on_file">callback-on-file</option>
+            <option value="internal_session">app session</option><option value="voice_known">voice recognized</option>
+            <option value="claimed_only" selected>claimed only ☎</option><option value="spoofed_channel">spoofed</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">WebRTC origin</label>
+          <select id="origin" class="w-full bg-slate-800/70 border border-white/10 rounded-lg text-sm px-2 py-2">
+            <option value="corporate_sso">corporate SSO</option><option value="known_pstn">known PSTN</option>
+            <option value="vpn">VPN</option><option value="unknown" selected>unknown</option>
+            <option value="foreign">foreign</option><option value="spoofed">spoofed</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">Voice anomaly (deepfake) <span id="va-val" class="mono text-slate-400"></span></label>
+          <input id="voice_anomaly" type="range" min="0" max="1" step="0.01" value="0" class="w-full mt-2">
+        </div>
       </div>
 
       <label class="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">What they're saying</label>
-      <textarea id="transcript" rows="4" class="w-full bg-slate-800/70 border border-white/10 rounded-lg text-sm px-3 py-2 mb-3"></textarea>
-
+      <textarea id="transcript" rows="3" class="w-full bg-slate-800/70 border border-white/10 rounded-lg text-sm px-3 py-2 mb-3"></textarea>
       <label class="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">Retrieval query the agent issues</label>
       <input id="query" class="w-full bg-slate-800/70 border border-white/10 rounded-lg text-sm px-3 py-2 mb-3" />
 
       <div class="flex items-center gap-3">
         <button id="run" class="flex-1 bg-gradient-to-r from-indigo-500 to-violet-600 hover:opacity-90 text-white font-medium rounded-lg px-4 py-2.5 text-sm">Run through Sentinel</button>
-        <label class="flex items-center gap-1.5 text-xs text-slate-400"><input id="intent" type="checkbox" class="accent-violet-500"> action</label>
+        <label class="flex items-center gap-1.5 text-xs text-slate-400"><input id="intent" type="checkbox" class="accent-violet-500"> action intent</label>
       </div>
-      <button id="redteam" class="w-full mt-3 glass hover:bg-white/10 rounded-lg px-4 py-2 text-sm text-slate-300">▶ Run AI Red Team (8 attacks)</button>
+      <button id="redteam" class="w-full mt-3 glass hover:bg-white/10 rounded-lg px-4 py-2 text-sm text-slate-300">▶ Run AI Red Team campaign</button>
     </section>
 
-    <!-- RIGHT: the verdict -->
+    <!-- RIGHT: verdict -->
     <section class="glass rounded-2xl p-5">
       <h2 class="text-sm font-semibold text-slate-300 mb-4">Sentinel verdict</h2>
       <div id="verdict-empty" class="text-slate-500 text-sm py-16 text-center">Run a request to see the firewall decision.</div>
-
       <div id="verdict" class="hidden">
         <div class="flex items-center gap-3 mb-4">
           <span id="badge" class="text-lg font-bold px-4 py-1.5 rounded-lg"></span>
-          <div class="text-xs text-slate-400" id="actor"></div>
+          <span id="trustpill" class="mono text-sm px-3 py-1 rounded-lg glass"></span>
         </div>
-
         <div class="space-y-3 mb-4">
           <div>
-            <div class="flex justify-between text-xs mb-1"><span class="text-slate-400">Effective trust</span><span id="trust-val" class="mono"></span></div>
-            <div class="h-2 rounded-full bg-slate-700/60 overflow-hidden"><div id="trust-bar" class="gauge h-full bg-emerald-400"></div></div>
+            <div class="flex justify-between text-xs mb-1"><span class="text-slate-400">SessionTrustScore</span><span id="trust-val" class="mono"></span></div>
+            <div class="h-2.5 rounded-full bg-slate-700/60 overflow-hidden relative">
+              <div id="trust-bar" class="gauge h-full bg-gradient-to-r from-rose-400 via-amber-300 to-emerald-400"></div>
+            </div>
+            <div class="flex justify-between text-[10px] text-slate-500 mt-0.5"><span>Public&gt;10</span><span>Internal&gt;50</span><span>Financial&gt;90</span></div>
           </div>
-          <div>
-            <div class="flex justify-between text-xs mb-1"><span class="text-slate-400">Social-engineering risk</span><span id="se-val" class="mono"></span></div>
-            <div class="h-2 rounded-full bg-slate-700/60 overflow-hidden"><div id="se-bar" class="gauge h-full bg-rose-400"></div></div>
+          <div class="grid grid-cols-3 gap-2 text-center text-xs">
+            <div class="glass rounded-lg py-2"><div class="text-slate-400 text-[10px]">authority</div><div id="m-id" class="mono"></div></div>
+            <div class="glass rounded-lg py-2"><div class="text-slate-400 text-[10px]">deepfake</div><div id="m-df" class="mono text-rose-300"></div></div>
+            <div class="glass rounded-lg py-2"><div class="text-slate-400 text-[10px]">SE risk</div><div id="m-se" class="mono text-amber-300"></div></div>
           </div>
         </div>
-
-        <div id="signals" class="flex flex-wrap gap-1.5 mb-4"></div>
-
+        <div id="predictive" class="text-xs mb-3 px-3 py-2 rounded-lg bg-cyan-500/10 text-cyan-300 hidden"></div>
+        <div id="signals" class="flex flex-wrap gap-1.5 mb-3"></div>
         <div class="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Why</div>
-        <ul id="reasons" class="text-sm text-slate-300 space-y-1 mb-4 list-disc list-inside"></ul>
-
-        <div class="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Documents the agent tried to retrieve</div>
+        <ul id="reasons" class="text-sm text-slate-300 space-y-1 mb-3 list-disc list-inside"></ul>
+        <div id="action" class="hidden mb-3"></div>
+        <div class="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Documents requested</div>
         <div id="docs" class="space-y-2"></div>
       </div>
     </section>
   </div>
 
-  <!-- Red team report -->
   <section id="rt-panel" class="glass rounded-2xl p-5 mt-5 hidden">
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-sm font-semibold text-slate-300">AI Red Team — campaign report</h2>
@@ -118,73 +128,77 @@
 </div>
 
 <script>
-const $ = s => document.querySelector(s);
-let SCEN = [];
+const $=s=>document.querySelector(s); let SCEN=[];
+const badge={ALLOW:"bg-emerald-500/20 text-emerald-300",REDACT:"bg-amber-500/20 text-amber-300",BLOCK:"bg-rose-500/20 text-rose-300"};
+const dstyle={ALLOW:"border-emerald-500/30",REDACT:"border-amber-500/30",BLOCK:"border-rose-500/40"};
+const prio={CRITICAL:"text-rose-400",HIGH:"text-amber-400",MEDIUM:"text-cyan-400",NONE:"text-slate-500"};
 
-const badgeStyle = { ALLOW: "bg-emerald-500/20 text-emerald-300", REDACT: "bg-amber-500/20 text-amber-300", BLOCK: "bg-rose-500/20 text-rose-300" };
-const docStyle   = { ALLOW: "border-emerald-500/30", REDACT: "border-amber-500/30", BLOCK: "border-rose-500/40" };
+$('#voice_anomaly').oninput=e=>$('#va-val').textContent="("+(+e.target.value).toFixed(2)+")";
 
-async function init() {
-  const h = await (await fetch('/api/health')).json();
-  $('#llm-mode').textContent = h.llm ? 'LLM-backed' : 'deterministic mode';
-  const s = await (await fetch('/api/scenarios')).json();
-  SCEN = s.scenarios;
-  const sel = $('#scenario');
-  sel.innerHTML = '<option value="">— pick a scenario —</option>' +
-    SCEN.map((x,i)=>`<option value="${i}">${x.name}</option>`).join('');
-  sel.onchange = () => { const x = SCEN[sel.value]; if (!x) return;
-    $('#identity').value=x.claimed_identity; $('#verification').value=x.verification;
-    $('#transcript').value=x.transcript; $('#query').value=x.query; $('#intent').checked = x.intent==='action'; };
-  sel.value = "0"; sel.onchange();
+async function init(){
+  const h=await(await fetch('/api/health')).json();
+  $('#llm-mode').textContent = h.llm.ready ? ("LLM: "+h.llm.provider) : "deterministic mode";
+  $('#sink').textContent = "log: "+h.breach_sink.split(' ')[0];
+  const s=await(await fetch('/api/scenarios')).json(); SCEN=s.scenarios;
+  $('#scenario').innerHTML='<option value="">— scenario —</option>'+SCEN.map((x,i)=>`<option value="${i}">${x.name}</option>`).join('');
+  $('#scenario').onchange=()=>{const x=SCEN[$('#scenario').value]; if(!x)return;
+    $('#identity').value=x.claimed_identity;$('#verification').value=x.verification;$('#origin').value=x.origin;
+    $('#voice_anomaly').value=x.voice_anomaly;$('#va-val').textContent="("+(+x.voice_anomaly).toFixed(2)+")";
+    $('#transcript').value=x.transcript;$('#query').value=x.query;$('#intent').checked=x.intent==='action';};
+  $('#scenario').value="0";$('#scenario').onchange();
 }
 
-$('#run').onclick = async () => {
-  const body = { query:$('#query').value, claimed_identity:$('#identity').value,
-    verification:$('#verification').value, transcript:$('#transcript').value,
-    intent: $('#intent').checked ? 'action':'read' };
-  const d = await (await fetch('/api/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+$('#run').onclick=async()=>{
+  const body={query:$('#query').value,claimed_identity:$('#identity').value,verification:$('#verification').value,
+    origin:$('#origin').value,voice_anomaly:+$('#voice_anomaly').value,transcript:$('#transcript').value,
+    intent:$('#intent').checked?'action':'read'};
+  const d=await(await fetch('/api/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
   render(d);
 };
 
-function render(d) {
-  $('#verdict-empty').classList.add('hidden');
-  $('#verdict').classList.remove('hidden');
-  $('#badge').textContent = d.decision;
-  $('#badge').className = "text-lg font-bold px-4 py-1.5 rounded-lg " + badgeStyle[d.decision];
-  $('#actor').textContent = `${d.actor_name} · ${d.actor_role} · ${d.verification}`;
-  $('#trust-val').textContent = d.effective_trust + "/100";
-  $('#trust-bar').style.width = d.effective_trust + "%";
-  $('#se-val').textContent = d.se_risk + "/100";
-  $('#se-bar').style.width = d.se_risk + "%";
-  $('#signals').innerHTML = (d.se_signals||[]).map(s=>`<span class="text-[11px] px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300">${s}</span>`).join('');
-  $('#reasons').innerHTML = (d.reasons||[]).map(r=>`<li>${r}</li>`).join('');
-  $('#docs').innerHTML = (d.docs||[]).map(doc=>`
-    <div class="border ${docStyle[doc.decision]} rounded-lg p-3 bg-slate-800/40">
-      <div class="flex justify-between items-center mb-1">
-        <span class="text-sm font-medium">${doc.title}</span>
-        <span class="text-[11px] px-2 py-0.5 rounded ${badgeStyle[doc.decision]}">${doc.decision}</span>
-      </div>
-      <div class="text-[11px] text-slate-500 mb-1">${doc.sensitivity} · needs trust ${doc.required_trust} · relevance ${doc.relevance}</div>
-      <div class="text-xs mono text-slate-300">${doc.served}</div>
-    </div>`).join('');
+function render(d){
+  $('#verdict-empty').classList.add('hidden');$('#verdict').classList.remove('hidden');
+  const t=d.trust;
+  $('#badge').textContent=d.decision;$('#badge').className="text-lg font-bold px-4 py-1.5 rounded-lg "+badge[d.decision];
+  $('#trustpill').textContent="trust "+t.score+"/100";
+  $('#trust-val').textContent=t.score+"/100"; $('#trust-bar').style.width=t.score+"%";
+  $('#m-id').textContent=t.identity_trust; $('#m-df').textContent="−"+t.deepfake_penalty; $('#m-se').textContent=t.se_risk;
+  $('#signals').innerHTML=(t.se_signals||[]).map(s=>`<span class="text-[11px] px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300">${s}</span>`).join('');
+  $('#reasons').innerHTML=(d.reasons||[]).map(r=>`<li>${r}</li>`).join('');
+  const pf=d.predictive||{};
+  if(pf.warm){$('#predictive').classList.remove('hidden');$('#predictive').textContent="⚡ "+pf.note+"  ("+pf.lookup_ms+"ms warm hit)";}
+  else $('#predictive').classList.add('hidden');
+  const a=d.action;
+  if(a){$('#action').classList.remove('hidden');
+    $('#action').innerHTML=`<div class="rounded-lg p-3 ${a.authorized?'bg-emerald-500/10 border border-emerald-500/30':'bg-rose-500/10 border border-rose-500/30'}">
+      <div class="text-xs font-semibold ${a.authorized?'text-emerald-300':'text-rose-300'}">⚙ Action: ${a.name} — ${a.authorized?'AUTHORIZED':'BLOCKED'} (needs trust ${a.min_trust})</div>
+      <div class="text-[11px] text-slate-400 mt-1 mono">${a.method} ${a.endpoint} · ${JSON.stringify(a.arguments)}</div></div>`;
+  } else $('#action').classList.add('hidden');
+  $('#docs').innerHTML=(d.docs||[]).map(doc=>`
+    <div class="border ${dstyle[doc.decision]} rounded-lg p-3 bg-slate-800/40">
+      <div class="flex justify-between items-center mb-1"><span class="text-sm font-medium">${doc.title}</span>
+        <span class="text-[11px] px-2 py-0.5 rounded ${badge[doc.decision]}">${doc.decision}</span></div>
+      <div class="text-[11px] text-slate-500 mb-1">${doc.sensitivity} · needs trust &gt;${doc.required_trust} · relevance ${doc.relevance}</div>
+      ${doc.relationship&&doc.relationship.length?`<div class="text-[10px] text-cyan-400/70 mb-1 mono">${doc.relationship.join(' ')}</div>`:''}
+      <div class="text-xs mono text-slate-300">${doc.served}</div></div>`).join('');
 }
 
-$('#redteam').onclick = async () => {
-  $('#redteam').textContent = "running…";
-  const r = await (await fetch('/api/redteam',{method:'POST'})).json();
-  $('#redteam').textContent = "▶ Run AI Red Team (8 attacks)";
+$('#redteam').onclick=async()=>{
+  $('#redteam').textContent="running…";
+  const r=await(await fetch('/api/redteam',{method:'POST'})).json();
+  $('#redteam').textContent="▶ Run AI Red Team campaign";
   $('#rt-panel').classList.remove('hidden');
-  const rate = r.defense_rate;
-  $('#rt-rate').innerHTML = `<span class="${rate>=90?'text-emerald-400':rate>=70?'text-amber-400':'text-rose-400'}">${rate}% defended</span> <span class="text-slate-500 font-normal">(${r.defended}/${r.total})</span>`;
-  $('#rt-rows').innerHTML = r.results.map(x=>`
-    <div class="flex items-center justify-between text-sm border border-white/5 rounded-lg px-3 py-2 bg-slate-800/30">
-      <div><span class="${x.defended?'text-emerald-400':'text-rose-400'} font-medium">${x.defended?'✓ DEFENDED':'✗ BREACHED'}</span>
-        <span class="ml-2">${x.name}</span> <span class="text-slate-500 text-xs">(${x.category})</span></div>
-      <div class="text-xs text-slate-400 mono">exp ${x.expected} / got ${x.actual} · risk ${x.risk_score}</div>
-    </div>`).join('');
+  const rate=r.defense_rate;
+  $('#rt-rate').innerHTML=`<span class="${rate>=90?'text-emerald-400':rate>=70?'text-amber-400':'text-rose-400'}">${rate}% defended</span> <span class="text-slate-500 font-normal">(${r.defended}/${r.total})</span>`;
+  $('#rt-rows').innerHTML=r.results.map(x=>{
+    const leaked=x.status==='LEAKED';
+    return `<div class="flex items-center justify-between text-sm border border-white/5 rounded-lg px-3 py-2 bg-slate-800/30">
+      <div><span class="${leaked?'text-rose-400':'text-emerald-400'} font-medium">${leaked?'✗ '+x.status:'✓ '+x.status}</span>
+        <span class="ml-2">${x.name}</span> <span class="text-slate-500 text-xs">(${x.attack_type})</span></div>
+      <div class="text-xs text-slate-400 mono">trust ${x.trust_score} · ${x.target_sensitivity} · <span class="${prio[x.priority]||''}">${x.priority}</span></div></div>`;
+  }).join('');
   $('#rt-panel').scrollIntoView({behavior:'smooth'});
 };
-
 init();
 </script>
 </body>
