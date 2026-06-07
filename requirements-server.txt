@@ -8,6 +8,7 @@ fastapi>=0.110
 uvicorn[standard]>=0.29
 pydantic>=2.6
 python-dotenv>=1.0
+python-multipart>=0.0.9   # PDF upload + Twilio form webhooks
 
 # Moss — semantic retrieval + the threat-memory immune system.
 moss>=1.4
