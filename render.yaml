@@ -1,0 +1,32 @@
+# Render Blueprint — deploy Sentinel in ~5 min without AWS.
+# Dashboard: https://dashboard.render.com → New → Blueprint → connect this repo.
+# Set secret env vars in the Render dashboard after the service is created.
+
+services:
+  - type: web
+    name: sentinel-memory
+    runtime: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /api/health
+    envVars:
+      - key: SENTINEL_LLM_PROVIDERS
+        value: minimax,qwen
+      - key: AWS_REGION
+        value: us-east-1
+      - key: SENTINEL_LOG_GROUP
+        value: /sentinel/security
+      - key: MINIMAX_API_KEY
+        sync: false
+      - key: QWEN_API_KEY
+        sync: false
+      - key: MOSS_PROJECT_ID
+        sync: false
+      - key: MOSS_PROJECT_KEY
+        sync: false
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
