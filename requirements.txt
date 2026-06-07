@@ -24,8 +24,7 @@ openai>=1.0
 # AWS CloudWatch breach logging (falls back to local security_events.jsonl).
 boto3>=1.34
 
-# Voice transport — LiveKit Agents 1.3.x (the demo also runs fully offline via
-# stream_simulator / demo_call.py, so these are optional).
-# livekit-agents>=1.3.0,<1.4.0
-# livekit-plugins-deepgram>=1.3.0,<1.4.0
-# livekit-plugins-silero>=1.3.0,<1.4.0
+# Voice transport — LiveKit Agents 1.5.x. STT/LLM/TTS run via LiveKit
+# Inference (no OpenAI/Deepgram keys). The demo also runs fully offline via
+# demo_call.py, so this is optional.
+livekit-agents[silero,turn-detector]==1.5.16

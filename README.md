@@ -86,34 +86,50 @@ demo_call.py          # autonomous live-call play-by-play (no audio hardware)
 
 ---
 
+## Live integrations
+
+| Layer | Powered by | Status |
+|---|---|---|
+| Voice transport + STT/LLM/TTS | **LiveKit** Agents 1.5 + Inference | live (`src/middleware/livekit_agent.py`) |
+| Semantic retrieval | **Moss** (`sentinel_knowledge` index) | live, sub-10ms |
+| Trust-engine LLM reasoning | **MiniMax-M3** (OpenAI-compatible) | wired (deterministic fallback) |
+| Breach logging | **AWS** CloudWatch | wired (local fallback) |
+| Document ingestion | **Unsiloed** (PDF → chunks) | optional |
+
 ## Run it
 
+Moss needs Python ≥3.10 — use the uv-managed venv:
+
 ```bash
-pip install -r requirements.txt
-cp .env.example .env            # optional — add keys to light up LLM / AWS / LiveKit
+uv venv --python 3.12 .venv
+uv pip install --python .venv -r requirements.txt
+cp .env.example .env            # paste your LiveKit + Moss (+ MiniMax) keys
+
+# 0) Build the Moss knowledge index (once):
+.venv/bin/python build_moss_index.py
 
 # 1) AI Red Team (terminal) — the reliable backup demo:
-python run_red_team.py
+.venv/bin/python run_red_team.py
 
-# 2) Autonomous live call (predictive pre-fetch + verdict, no mic needed):
-python demo_call.py                 # deepfake CEO
-python demo_call.py call-verified-ceo
-python demo_call.py call-book-carrier
-python demo_call.py --list
+# 2) Autonomous live call (predictive pre-fetch + verdict, no mic):
+.venv/bin/python demo_call.py                 # deepfake CEO  -> BLOCK
+.venv/bin/python demo_call.py call-verified-ceo   # same ask, verified -> ALLOW
+.venv/bin/python demo_call.py call-book-carrier   # authorized action
 
 # 3) Live dashboard:
-uvicorn server:app --port 8000
+.venv/bin/python -m uvicorn server:app --port 8000
 open http://localhost:8000
 
-# 4) (optional) Real voice via LiveKit:
-pip install "livekit-agents[deepgram,silero]~=1.3"
-python -m src.middleware.livekit_agent
+# 4) Real voice agent (LiveKit Inference — no OpenAI/Deepgram key):
+.venv/bin/python -m src.middleware.livekit_agent console   # talk via terminal mic
+# or `... start` to run as a worker the moss-hacker-starter frontend can dispatch to
+# (set the frontend AGENT_NAME=sentinel). Stamp dispatch metadata to set trust, e.g.
+# {"claimed_identity":"ceo","verification":"cryptographic","origin":"corporate_sso",
+#  "verified_user_id":"user:mark"} for the allow path.
 ```
 
-**No keys?** Everything still runs: trust scoring is deterministic, breaches log
-to `security_events.jsonl`. Add `OPENAI_API_KEY` (or `MINIMAX_API_KEY` +
-`SENTINEL_LLM_PROVIDER=minimax`) for LLM-grade social-engineering detection, and
-AWS creds for CloudWatch.
+**No keys?** Everything still runs: retrieval falls back to a local lexical
+index, trust scoring is deterministic, breaches log to `security_events.jsonl`.
 
 ---
 
