@@ -229,7 +229,7 @@ let SCEN=[];
 
 // Tabs
 const EXPLAIN={
-  firewall:"<b class='text-slate-200'>Firewall Console</b> — type any request + caller context. Sentinel scores the session with <b class='text-indigo-300'>MiniMax-M3</b> threat analysis + identity verification, then ALLOWs / REDACTs / BLOCKs each document. “Compare” shows a naïve RAG leaking the same data.",
+  firewall:"<b class='text-slate-200'>Firewall Console</b> — type any request + caller context. Sentinel scores the session with a <b class='text-indigo-300'>dual-analyst consensus (MiniMax + Qwen)</b> + identity verification, then ALLOWs / REDACTs / BLOCKs each document. “Compare” shows a naïve RAG leaking the same data.",
   voice:"<b class='text-slate-200'>Live Voice</b> — actually <b>call the AI agent</b> in your browser (LiveKit). It retrieves from Moss to answer, but every lookup is gated by Sentinel live. Try claiming to be the CEO over a spoofed line — it gets blocked; verified — it answers.",
   immune:"<b class='text-slate-200'>Immune System</b> — the <b class='text-fuchsia-300'>unusual use of Moss</b>: a second index stores <em>attacks</em>, so every utterance is matched against known attacks via Moss semantic search (a vector-native IDS), catching paraphrased attacks regex misses — and it <b>learns</b> new ones at runtime.",
   redteam:"<b class='text-slate-200'>Red Team</b> — fires deepfake, prompt-injection and wire-fraud attacks at the firewall and reports the defense rate, so you can prove coverage, not just demo one case."
@@ -251,7 +251,7 @@ setExplain('firewall');
     const tm=h.threat_memory||{};
     $('#p-threat').textContent='immune: '+(tm.backend||'?')+' ('+(tm.signatures||0)+')';
     $('#p-threat').classList.add(tm.backend==='moss'?'text-fuchsia-300':'text-slate-300');
-    $('#p-llm').textContent='llm: '+(h.llm.ready?h.llm.provider:'deterministic');
+    $('#p-llm').textContent='llm: '+(h.llm.ready?(h.llm.ensemble?(h.llm.provider+' ('+(h.llm.engines||[]).filter(e=>e.ready).length+'-analyst)'):h.llm.provider):'deterministic');
     $('#p-sink').textContent='log: '+h.breach_sink.split(' ')[0];
   }catch(e){}
 })();
@@ -295,10 +295,15 @@ function renderVerdict(d){
     const hot=(th.risk??t.se_risk)>=50;
     $('#threat').classList.remove('hidden');
     $('#threat').className='mb-3 rounded-xl p-3 border '+(hot?'border-rose-500/40 bg-rose-500/10':'border-emerald-500/30 bg-emerald-500/10');
+    const engs=th.engines||[];
+    const engRow=engs.length>1?`<div class="flex flex-wrap gap-1.5 mb-1">${engs.map(e=>`<span class="text-[10px] px-2 py-0.5 rounded-full ${e.risk>=50?'bg-rose-500/15 text-rose-300':'bg-white/10 text-slate-300'} mono">${e.model} · risk ${e.risk}</span>`).join('')}</div>`:'';
+    const cons=th.consensus||{};
+    const disagree=(cons.risk_spread||0)>=30?`<div class="text-[10px] text-amber-300 mono mt-1">⚠ analysts disagree by ${cons.risk_spread} pts — escalated for review.</div>`:'';
     $('#threat').innerHTML=`<div class="flex items-center justify-between mb-1">
-        <span class="text-xs font-semibold ${hot?'text-rose-300':'text-emerald-300'}">🧠 AI threat analysis — ${th.attack_type||'none'}</span>
+        <span class="text-xs font-semibold ${hot?'text-rose-300':'text-emerald-300'}">🧠 AI threat analysis${engs.length>1?` — ${engs.length}-analyst consensus`:''} — ${th.attack_type||'none'}</span>
         <span class="text-[10px] px-2 py-0.5 rounded bg-white/10 text-slate-300 mono">${th.engine||'engine'} · ${th.confidence??''}% conf</span></div>
-      <div class="text-[12px] text-slate-300 leading-snug">${th.reasoning||''}</div>`;
+      ${engRow}
+      <div class="text-[12px] text-slate-300 leading-snug">${th.reasoning||''}</div>${disagree}`;
   } else $('#threat').classList.add('hidden');
   const sm=(th&&th.semantic)||{};
   if(sm.signature_id){

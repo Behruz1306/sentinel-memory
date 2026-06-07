@@ -47,6 +47,46 @@ def test_social_engineering_detected_deterministically():
     assert "prompt_injection" in signals or "channel_change" in signals
 
 
+def _fast(risk=0, matched=False, sem_risk=0, tactics=None):
+    return {
+        "risk": risk, "attack_type": "none", "tactics": tactics or [],
+        "confidence": 50, "recommendation": "ALLOW", "reasoning": "",
+        "engine": "heuristic",
+        "semantic": {"matched": matched, "risk": sem_risk},
+    }
+
+
+def _engine(provider, model, risk, rec="ALLOW", attack="prompt injection"):
+    return {"provider": provider, "model": model, "parsed": {
+        "risk": risk, "attack_type": attack, "tactics": [f"{provider}:t"],
+        "confidence": 80, "recommendation": rec, "reasoning": f"{model} says {risk}"}}
+
+
+def test_consensus_takes_max_risk_across_analysts():
+    out = te._consensus(
+        [_engine("minimax", "MiniMax-M3", 40), _engine("qwen", "qwen-plus", 88)],
+        _fast())
+    assert out["risk"] == 88                       # conservative: max wins
+    assert out["recommendation"] == "BLOCK"
+    assert len(out["engines"]) == 2
+    assert out["consensus"]["risk_spread"] == 48   # disagreement surfaced
+    assert "MiniMax-M3" in out["engine"] and "qwen-plus" in out["engine"]
+
+
+def test_consensus_floored_by_semantic_match():
+    # Both LLMs say low, but Moss already proved a 70-risk attack → floor holds.
+    out = te._consensus(
+        [_engine("minimax", "MiniMax-M3", 5), _engine("qwen", "qwen-plus", 10)],
+        _fast(matched=True, sem_risk=70, tactics=["semantic:prompt injection"]))
+    assert out["risk"] >= 70
+
+
+def test_consensus_falls_back_when_no_engine_parses():
+    fast = _fast(risk=30, tactics=["prompt_injection"])
+    assert te._consensus([{"provider": "qwen", "model": "qwen-plus",
+                           "parsed": None}], fast) is fast
+
+
 def test_enforce_raises_and_carries_breach():
     from src.core.graph_kb import KnowledgeGraph
     from src.core.exceptions import AccessDeniedException

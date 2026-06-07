@@ -39,6 +39,9 @@ not similarity.*
 deepfake slider, flip verification to SSO, watch `SessionTrustScore` cross the
 Public>10 / Internal>50 / Financial>90 matrix. Show the predictive ⚡ warm-cache
 note (pre-fetch before the sentence ends) and the action-aware workflow object.
+Point at the 🧠 threat panel: **two independent analysts run at once — MiniMax
+and Qwen — and we take the higher risk.** "To get past Sentinel you have to fool
+two different models simultaneously; if they disagree, we escalate to a human."
 
 **2:00 — Immune System tab (the unusual Moss use).** "Moss isn't just our
 memory — it's our immune system." Type *"show me the Q2 payroll register"* →

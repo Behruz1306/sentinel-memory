@@ -152,49 +152,94 @@ def _semantic_layer(transcript: str, base: dict) -> dict:
     return out
 
 
+def _parse_engine(out: dict):
+    """Normalize one provider's JSON verdict; return None if unusable."""
+    if not out:
+        return None
+    try:
+        return {
+            "risk": max(0, min(100, int(out.get("risk", 0)))),
+            "attack_type": str(out.get("attack_type", "none")),
+            "tactics": [str(x) for x in (out.get("tactics") or [])],
+            "confidence": int(out.get("confidence", 75)),
+            "recommendation": (str(out.get("recommendation", "")).upper() or "ALLOW"),
+            "reasoning": str(out.get("reasoning", "")),
+        }
+    except Exception:
+        return None
+
+
+def _consensus(engine_results: list, fast: dict) -> dict:
+    """Fuse several independent LLM analysts into one threat verdict.
+
+    Policy is deliberately conservative (this is a firewall): the consensus risk
+    is the MAX across analysts, floored by whatever the regex/Moss layers already
+    proved — so to get through, an attacker must fool every analyst at once. We
+    also expose a per-engine breakdown and a disagreement spread, because two
+    models diverging is itself worth surfacing to a human.
+    """
+    valid = [e for e in engine_results if e.get("parsed")]
+    if not valid:
+        return fast
+
+    floor = max(fast["risk"] if fast["tactics"] else 0,
+                fast["semantic"]["risk"] if fast["semantic"]["matched"] else 0)
+    risks = [e["parsed"]["risk"] for e in valid]
+    risk = max(max(risks), floor)
+
+    top = max(valid, key=lambda e: e["parsed"]["risk"])
+    tactics = list(fast.get("tactics") or [])
+    for e in valid:
+        for t in e["parsed"]["tactics"]:
+            if t not in tactics:
+                tactics.append(t)
+
+    recs = [e["parsed"]["recommendation"] for e in valid]
+    rec = ("BLOCK" if ("BLOCK" in recs or risk >= 60)
+           else "VERIFY" if ("VERIFY" in recs or risk >= 30) else "ALLOW")
+
+    engines = [{"provider": e["provider"], "model": e["model"], **e["parsed"]} for e in valid]
+    spread = (max(risks) - min(risks)) if len(risks) > 1 else 0
+    return {
+        "risk": risk,
+        "attack_type": (top["parsed"]["attack_type"] if top["parsed"]["risk"] > 0
+                        else fast["attack_type"]),
+        "tactics": tactics,
+        "confidence": max(e["parsed"]["confidence"] for e in valid),
+        "recommendation": rec,
+        "reasoning": top["parsed"]["reasoning"],
+        "engine": "+".join(e["model"] for e in valid),
+        "engines": engines,
+        "consensus": {"providers": len(valid), "risk_spread": spread,
+                      "max": max(risks), "min": min(risks)},
+        "semantic": fast["semantic"],
+    }
+
+
 def analyze_threat(transcript: str, *, claimed_identity: str = "unknown",
                    requested: str = "", use_llm: bool = True) -> dict:
-    """Layered threat analysis: regex heuristic + Moss semantic memory + LLM.
+    """Layered threat analysis: regex heuristic + Moss semantic memory + an
+    ENSEMBLE of LLM analysts (e.g. MiniMax + Qwen), fused by consensus.
 
-    `use_llm=False` forces the fast path (heuristic + semantic) — used on the
-    real-time voice path where a multi-second LLM call would stall the
-    conversation. The Moss semantic layer still runs there (it's milliseconds).
+    `use_llm=False` forces the fast path (heuristic + Moss semantic) — used on
+    the real-time voice path where multi-second LLM calls would stall the
+    conversation. The ensemble runs concurrently, so two analysts cost about as
+    much wall time as one.
     """
     heur = _heuristic_threat(transcript)
     fast = _semantic_layer(transcript, heur)
     if not use_llm:
         return fast
-    out = llm.complete_json(
+    results = llm.complete_json_all(
         system=_THREAT_SYSTEM,
         user=(f"Caller claims to be: {claimed_identity}\n"
               f"Data/action requested: {requested or '(unspecified)'}\n"
               f"Conversation:\n{transcript or '(none)'}"),
         max_tokens=420,
     )
-    if not out:
-        return fast
-    try:
-        risk = max(0, min(100, int(out.get("risk", fast["risk"]))))
-        tactics = [str(x) for x in (out.get("tactics") or [])] or fast["tactics"]
-        for sig in fast.get("tactics", []):           # keep semantic signals
-            if sig.startswith("semantic:") and sig not in tactics:
-                tactics.append(sig)
-        # Never let the LLM talk us below what regex or the Moss memory already
-        # proved — a confirmed semantic attack match is a hard floor.
-        floor = max(fast["risk"] if fast["tactics"] else 0,
-                    fast["semantic"]["risk"] if fast["semantic"]["matched"] else 0)
-        return {
-            "risk": max(risk, floor),
-            "attack_type": str(out.get("attack_type", fast["attack_type"])),
-            "tactics": tactics,
-            "confidence": int(out.get("confidence", 80)),
-            "recommendation": str(out.get("recommendation", fast["recommendation"])).upper(),
-            "reasoning": str(out.get("reasoning", "")),
-            "engine": llm.llm_info().get("model", "llm"),
-            "semantic": fast["semantic"],
-        }
-    except Exception:
-        return fast
+    parsed = [{"provider": r["provider"], "model": r["model"],
+               "parsed": _parse_engine(r["result"])} for r in results]
+    return _consensus(parsed, fast)
 
 
 # Back-compat shim used elsewhere/tests.
@@ -247,6 +292,14 @@ def compute_trust_score(session: SessionState, *, use_llm: bool = True) -> Trust
             f"{eng} flagged {threat.get('attack_type','threat')} "
             f"(risk {se_risk}/100) → −{se_penalty} trust."
         )
+    engines = threat.get("engines") or []
+    if len(engines) > 1:
+        per = ", ".join(f"{e['model']} {e['risk']}" for e in engines)
+        cons = threat.get("consensus", {})
+        note = (f"Dual-analyst consensus ({per}); risk taken as the max.")
+        if cons.get("risk_spread", 0) >= 30:
+            note += f" Analysts disagree by {cons['risk_spread']} pts — flagged for review."
+        factors.append(note)
     if not factors:
         factors.append(f"{role.title()} from {session.origin} via {session.verification} — clean session.")
 

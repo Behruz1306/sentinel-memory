@@ -93,7 +93,7 @@ src/
     actions.py        action aware executable workflow registry
     retrieval.py      the orchestrator: predictive, then trust gate, then action
     cloudwatch.py     AWS CloudWatch breach logging (local fallback)
-    llm.py            OpenAI / MiniMax / gateway agnostic wrapper (deterministic fallback)
+    llm.py            Multi provider LLM ensemble (MiniMax + Qwen + OpenAI), concurrent, deterministic fallback
     threat_memory.py  Moss as immune system: local first session index of ATTACKS (semantic IDS)
   middleware/
     livekit_agent.py  LiveKit Agents 1.x handler: aggressive VAD and interim STT piping
@@ -118,7 +118,7 @@ Semantic retrieval of company knowledge runs on Moss, using the `sentinel_knowle
 
 Semantic threat detection runs on a local first Moss session index of attacks. It is live, takes about three milliseconds per check, and learns new attacks as it sees them.
 
-The trust engine can call MiniMax M3 (an OpenAI compatible endpoint) for deeper reasoning, and falls back to a deterministic analysis when no key is present.
+For deeper reasoning the trust engine runs an ensemble of two independent language models at once, MiniMax M3 and Alibaba Qwen, both through OpenAI compatible endpoints. The two analysts are queried concurrently, so two models cost about the same wall clock time as one, and their verdicts are fused by consensus. The firewall takes the higher of the two risk scores, never below what the heuristic and the Moss threat memory already proved, so to slip an attack through an adversary has to fool both models at the same time. When the two analysts disagree by a wide margin that disagreement is itself surfaced as a signal for human review. The whole layer is provider agnostic and degrades gracefully: with one key it uses one model, with no key it falls back to the deterministic analysis. Set the providers with SENTINEL_LLM_PROVIDERS, for example minimax,qwen.
 
 Breach logging goes to AWS CloudWatch when credentials are available, and otherwise falls back to a local file. Document ingestion through Unsiloed (turning PDFs into chunks) is supported and optional.
 
@@ -131,7 +131,7 @@ Moss needs Python 3.10 or newer, so use the uv managed virtual environment.
 ```bash
 uv venv --python 3.12 .venv
 uv pip install --python .venv -r requirements.txt
-cp .env.example .env            # paste your LiveKit and Moss (and MiniMax) keys
+cp .env.example .env            # paste your LiveKit, Moss, and both LLM keys (MiniMax + Qwen)
 
 # Build the Moss knowledge index once. The threat memory immune system warms
 # itself automatically, and build_threat_index.py can self test it and
