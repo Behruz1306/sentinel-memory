@@ -83,6 +83,32 @@ def evaluate(body: EvalBody):
     return result.to_dict()
 
 
+@app.post("/api/compare")
+def compare(body: EvalBody):
+    """Naive similarity-only RAG vs Sentinel — the core thesis, side by side.
+
+    `naive` is what a vanilla RAG agent would feed its LLM: the top semantic
+    hits in full, sensitivity ignored. `sentinel` is the trust-gated result.
+    """
+    s = SessionState(
+        session_id="cmp", caller_id="api",
+        claimed_identity=body.claimed_identity, verification=body.verification,
+        origin=body.origin, origin_ip=body.origin_ip,
+        voice_anomaly=body.voice_anomaly, verified_user_id=body.verified_user_id,
+    )
+    if body.transcript:
+        s.commit_final(body.transcript)
+    sentinel = _retriever.execute(s, body.query, intent=body.intent, raise_on_deny=False)
+    naive_hits = _retriever._retrieve(body.query, 4) or []
+    naive = [
+        {"title": doc.title, "sensitivity": doc.sensitivity,
+         "leaked": doc.sensitivity in ("CONFIDENTIAL", "RESTRICTED", "FINANCIAL"),
+         "served": doc.content}
+        for doc, _ in naive_hits
+    ]
+    return {"naive": naive, "sentinel": sentinel.to_dict()}
+
+
 @app.post("/api/simulate/{call_id}")
 def simulate(call_id: str):
     """Run a scripted call through the pipeline; return the play-by-play."""

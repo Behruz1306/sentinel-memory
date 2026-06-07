@@ -94,6 +94,17 @@
         <button id="run" class="flex-1 bg-gradient-to-r from-indigo-500 to-violet-600 hover:brightness-110 text-white font-semibold rounded-xl px-4 py-3 text-sm transition">Run through Sentinel →</button>
         <label class="flex items-center gap-2 text-xs text-slate-300"><input id="intent" type="checkbox" class="accent-violet-500 w-4 h-4"> action</label>
       </div>
+      <button id="compare" class="w-full mt-3 glass hover:bg-white/10 rounded-xl px-4 py-2.5 text-sm text-slate-300 transition">⚖️ Compare: Naive RAG vs Sentinel</button>
+      <div id="cmp" class="hidden mt-4 grid grid-cols-2 gap-3 fade">
+        <div>
+          <div class="text-[11px] font-semibold text-rose-300 mb-2">❌ Naive RAG (similarity only)</div>
+          <div id="cmp-naive" class="space-y-1.5"></div>
+        </div>
+        <div>
+          <div class="text-[11px] font-semibold text-emerald-300 mb-2">🛡️ Sentinel (trust-gated)</div>
+          <div id="cmp-sent" class="space-y-1.5"></div>
+        </div>
+      </div>
     </div>
 
     <div class="glass rounded-2xl p-5">
@@ -244,6 +255,27 @@ function renderVerdict(d){
       ${doc.relationship&&doc.relationship.length?`<div class="text-[10px] text-cyan-400/70 mb-1 mono">${doc.relationship.join(' ')}</div>`:''}
       <div class="text-xs mono text-slate-300 break-words">${doc.served}</div></div>`).join('');
 }
+
+$('#compare').onclick=async()=>{
+  const body={query:$('#query').value,claimed_identity:$('#identity').value,verification:$('#verification').value,
+    origin:$('#origin').value,voice_anomaly:+$('#voice_anomaly').value,transcript:$('#transcript').value,
+    intent:$('#intent').checked?'action':'read'};
+  const d=await(await fetch('/api/compare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+  $('#cmp').classList.remove('hidden');
+  $('#cmp-naive').innerHTML=d.naive.map(x=>`
+    <div class="rounded-lg p-2.5 border ${x.leaked?'border-rose-500/40 bg-rose-500/10':'border-white/10 bg-slate-800/40'}">
+      <div class="flex justify-between items-center"><span class="text-xs font-medium">${x.title}</span>
+        ${x.leaked?'<span class="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/30 text-rose-200">LEAKED</span>':''}</div>
+      <div class="text-[10px] text-slate-500">${x.sensitivity}</div>
+      <div class="text-[10px] mono text-slate-300 mt-1 line-clamp-2">${x.served.slice(0,90)}…</div></div>`).join('');
+  const docs=d.sentinel.docs||[];
+  $('#cmp-sent').innerHTML=docs.map(x=>`
+    <div class="rounded-lg p-2.5 border ${DBORDER[x.decision]} bg-slate-800/40">
+      <div class="flex justify-between items-center"><span class="text-xs font-medium">${x.title}</span>
+        <span class="text-[10px] px-1.5 py-0.5 rounded ${BADGE[x.decision]}">${x.decision}</span></div>
+      <div class="text-[10px] text-slate-500">${x.sensitivity}</div>
+      <div class="text-[10px] mono text-slate-300 mt-1 line-clamp-2">${x.served.slice(0,90)}${x.served.length>90?'…':''}</div></div>`).join('');
+};
 
 // ---------- Red Team ----------
 $('#redteam').onclick=async()=>{

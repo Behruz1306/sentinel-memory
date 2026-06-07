@@ -13,6 +13,10 @@ Built for the **Moss Conversational AI Hackathon @ Y Combinator** · June 2026.
 
 **Repo:** https://github.com/Behruz1306/sentinel-memory · **Demo runbook:** [DEMO.md](DEMO.md)
 
+![CI](https://github.com/Behruz1306/sentinel-memory/actions/workflows/ci.yml/badge.svg)
+
+Tests: `.venv/bin/python -m pytest -q` (15 offline, deterministic).
+
 > One-command demo (after setup below): `./run_demo.sh` → open http://localhost:8000
 > Live-verified: Moss semantic retrieval, LiveKit voice agent registered as
 > `sentinel`, in-browser voice with a real-time trust-gated verdict stream,
