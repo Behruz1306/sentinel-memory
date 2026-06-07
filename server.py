@@ -81,6 +81,18 @@ def index():
     return FileResponse(os.path.join(STATIC_DIR, "dashboard.html"))
 
 
+@app.get("/favicon.ico")
+def favicon():
+    """Avoid noisy 404s in the browser console."""
+    from fastapi.responses import Response
+    return Response(status_code=204)
+
+
+def _cloud_deploy() -> bool:
+    """Render and similar PaaS set RENDER=true; small instances can't run 8× dual-LLM."""
+    return os.getenv("RENDER") == "true" or os.getenv("SENTINEL_CLOUD_DEPLOY") == "1"
+
+
 @app.get("/api/health")
 def health():
     return {
@@ -283,7 +295,9 @@ def _ev(kind, payload):
 
 @app.post("/api/redteam")
 def redteam():
-    camp = run_campaign()
+    # Cloud: sequential + heuristic/Moss only — avoids 502/OOM from 8 parallel LLM calls.
+    cloud = _cloud_deploy()
+    camp = run_campaign(use_llm=not cloud, max_workers=1 if cloud else 8)
     return {
         "total": camp["total"], "defended": camp["defended"],
         "breached": camp["breached"], "defense_rate": camp["defense_rate"],

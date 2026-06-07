@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Sentinel Memory — Trust-Aware Retrieval Firewall for AI Agents</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -334,6 +335,29 @@
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s);
+
+async function fetchJSON(url, opts){
+  const r=await fetch(url, opts);
+  if(!r.ok){
+    const hint=r.status===502||r.status===503
+      ? 'Server waking up (Render free tier) — wait 30s and retry.'
+      : `HTTP ${r.status}`;
+    throw new Error(hint);
+  }
+  const t=await r.text();
+  if(!t) throw new Error('Empty response from server');
+  try{ return JSON.parse(t); }catch(e){ throw new Error('Invalid JSON from server'); }
+}
+async function wakeServer(tries=8){
+  for(let i=0;i<tries;i++){
+    try{
+      const r=await fetch('/api/health',{cache:'no-store'});
+      if(r.ok) return true;
+    }catch(e){}
+    await new Promise(r=>setTimeout(r, 4000));
+  }
+  return false;
+}
 const BADGE={ALLOW:"bg-emerald-500/20 text-emerald-300",REDACT:"bg-amber-500/20 text-amber-300",BLOCK:"bg-rose-500/20 text-rose-300"};
 const DBORDER={ALLOW:"border-emerald-500/30",REDACT:"border-amber-500/30",BLOCK:"border-rose-500/40"};
 const PRIO={CRITICAL:"text-rose-400",HIGH:"text-amber-400",MEDIUM:"text-cyan-400",NONE:"text-slate-500"};
@@ -471,8 +495,9 @@ $('#compare').onclick=async()=>{
 // ---------- Red Team ----------
 $('#redteam').onclick=async()=>{
   $('#redteam').textContent='running…'; $('#redteam').disabled=true;
-  const r=await(await fetch('/api/redteam',{method:'POST'})).json();
-  $('#redteam').textContent='▶ Run campaign'; $('#redteam').disabled=false;
+  try{
+    await wakeServer(3);
+    const r=await fetchJSON('/api/redteam',{method:'POST'});
   const rate=r.defense_rate, col=rate>=90?'emerald':rate>=70?'amber':'rose';
   $('#rt-summary').classList.remove('hidden');
   $('#rt-summary').innerHTML=`<div class="flex items-center gap-4">
@@ -484,6 +509,11 @@ $('#redteam').onclick=async()=>{
       <div><div class="text-sm font-medium ${leaked?'text-rose-400':'text-emerald-400'}">${leaked?'✗ '+x.status:'✓ '+x.status} · <span class="text-slate-200">${x.name}</span></div>
         <div class="text-[11px] text-slate-500">${x.attack_type} → target ${x.target_sensitivity}</div></div>
       <div class="text-right text-[11px] mono text-slate-400">trust ${x.trust_score} · SE ${x.se_risk}<br><span class="${PRIO[x.priority]}">remediation ${x.priority}</span></div></div>`;}).join('');
+  }catch(e){
+    $('#rt-summary').classList.remove('hidden');
+    $('#rt-summary').innerHTML=`<div class="text-sm text-amber-300">⚠ ${e.message}</div>`;
+  }
+  $('#redteam').textContent='▶ Run campaign'; $('#redteam').disabled=false;
 };
 
 // ---------- Live Voice ----------
@@ -725,29 +755,40 @@ function renderCommandCenter(s){
   }
 }
 
+let _wsDelay=2000;
 function connectWS(){
   const proto=location.protocol==='https:'?'wss':'ws';
   try{
     _ws=new WebSocket(`${proto}://${location.host}/api/ws/dashboard`);
-    _ws.onopen=()=>{$('#cc-ws').textContent='ws live';$('#cc-ws').className='text-[10px] mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300';};
-    _ws.onmessage=e=>{ try{renderCommandCenter(JSON.parse(e.data));}catch(x){} };
-    _ws.onclose=()=>{$('#cc-ws').textContent='ws reconnect…';$('#cc-ws').className='text-[10px] mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-300'; setTimeout(connectWS,2000);};
-  }catch(e){ setTimeout(connectWS,3000); }
+    _ws.onopen=()=>{_wsDelay=2000; $('#cc-ws').textContent='ws live';$('#cc-ws').className='text-[10px] mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300';};
+    _ws.onmessage=e=>{ try{const d=JSON.parse(e.data); if(d.type!=='ping') renderCommandCenter(d);}catch(x){} };
+    _ws.onerror=()=>{$('#cc-ws').textContent='ws error';$('#cc-ws').className='text-[10px] mono px-2 py-0.5 rounded bg-rose-500/15 text-rose-300';};
+    _ws.onclose=()=>{$('#cc-ws').textContent='ws reconnect…';$('#cc-ws').className='text-[10px] mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-300'; setTimeout(connectWS,_wsDelay); _wsDelay=Math.min(_wsDelay*1.5,15000);};
+  }catch(e){ setTimeout(connectWS,_wsDelay); }
 }
-connectWS();
-fetch('/api/stream/state').then(r=>r.json()).then(renderCommandCenter).catch(()=>{});
+(async()=>{
+  await wakeServer(6);
+  connectWS();
+  fetchJSON('/api/stream/state').then(renderCommandCenter).catch(()=>{});
+})();
 
 $('#cc-sim-call').onclick=async()=>{
   $('#cc-sim-call').textContent='running…';
-  const d=await(await fetch('/api/simulate/call-deepfake-cfo',{method:'POST'})).json();
+  try{
+    await wakeServer(3);
+    await fetchJSON('/api/simulate/call-deepfake-cfo',{method:'POST'});
+    renderCommandCenter(await fetchJSON('/api/stream/state'));
+  }catch(e){ showToast('⚠ '+e.message,'alert'); }
   $('#cc-sim-call').textContent='▶ Simulate deepfake call';
-  if(d.events) renderCommandCenter(await(await fetch('/api/stream/state')).json());
 };
 $('#cc-redteam').onclick=async()=>{
   $('#cc-redteam').textContent='firing…';
-  await fetch('/api/redteam',{method:'POST'});
+  try{
+    await wakeServer(3);
+    await fetchJSON('/api/redteam',{method:'POST'});
+    renderCommandCenter(await fetchJSON('/api/stream/state'));
+  }catch(e){ showToast('⚠ '+e.message,'alert'); }
   $('#cc-redteam').textContent='▶ Fire Red Team';
-  renderCommandCenter(await(await fetch('/api/stream/state')).json());
 };
 </script>
 </body>

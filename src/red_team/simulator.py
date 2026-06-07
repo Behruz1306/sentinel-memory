@@ -58,7 +58,8 @@ def _priority(attack: Attack, status: str) -> str:
     return "NONE"
 
 
-def run_attack(retriever: SentinelRetriever, attack: Attack) -> AttackResult:
+def run_attack(retriever: SentinelRetriever, attack: Attack, *,
+               use_llm: bool = True) -> AttackResult:
     session = SessionState(
         session_id=attack.id, caller_id=attack.caller_id,
         claimed_identity=attack.claimed_identity, verification=attack.verification,
@@ -73,7 +74,7 @@ def run_attack(retriever: SentinelRetriever, attack: Attack) -> AttackResult:
     semantic = threat_memory.detect(attack.transcript).to_dict()
     try:
         result = retriever.execute(session, attack.query, intent=attack.intent,
-                                   raise_on_deny=True)
+                                   raise_on_deny=True, use_llm=use_llm)
         status = _classify(attack, result)
         trust = result.trust["score"]
         se = result.trust["se_risk"]
@@ -117,15 +118,17 @@ def run_attack(retriever: SentinelRetriever, attack: Attack) -> AttackResult:
                         semantic=semantic)
 
 
-def run_campaign(attacks=None):
+def run_campaign(attacks=None, *, use_llm: bool = True, max_workers: int = 8):
     from concurrent.futures import ThreadPoolExecutor
 
     retriever = SentinelRetriever()
     items = list(attacks or ATTACKS)
-    # Run attacks concurrently — each makes its own (slow) LLM call, so threads
-    # turn a ~minute of sequential analysis into a few seconds.
-    with ThreadPoolExecutor(max_workers=min(8, len(items))) as pool:
-        results = list(pool.map(lambda a: run_attack(retriever, a), items))
+    workers = max(1, min(max_workers, len(items)))
+    # Concurrent LLM calls are fine locally; on small cloud instances run
+    # sequentially (max_workers=1) and optionally skip LLM (use_llm=False).
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(
+            lambda a: run_attack(retriever, a, use_llm=use_llm), items))
     breached = sum(1 for r in results if r.status == "LEAKED")
     defended = len(results) - breached
     return {
