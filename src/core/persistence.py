@@ -36,10 +36,27 @@ def _connect() -> sqlite3.Connection:
 
 def _init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript("""
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            name TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'analyst',
+            org TEXT DEFAULT '',
+            title TEXT DEFAULT '',
+            created_at REAL
+        );
+        CREATE TABLE IF NOT EXISTS auth_tokens (
+            token TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            expires_at REAL,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
             company_id TEXT NOT NULL DEFAULT 'acme-logistics',
             channel TEXT NOT NULL DEFAULT 'chat',
+            user_id TEXT,
             caller_name TEXT,
             claimed_identity TEXT,
             verification TEXT,
@@ -77,23 +94,97 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id);
         CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     """)
+    _migrate(conn)
     conn.commit()
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+    if "user_id" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT")
+
+
+# --- Users & auth tokens -----------------------------------------------------
+
+def ensure_user(*, email: str, password_hash: str, name: str, role: str = "analyst",
+                  org: str = "", title: str = "") -> str:
+    existing = get_user_by_email(email)
+    if existing:
+        return existing["id"]
+    return create_user(email=email, password_hash=password_hash, name=name,
+                       role=role, org=org, title=title)
+
+
+def create_user(*, email: str, password_hash: str, name: str, role: str = "analyst",
+                org: str = "", title: str = "") -> str:
+    uid = f"usr-{uuid.uuid4().hex[:10]}"
+    now = time.time()
+    with _lock:
+        _connect().execute(
+            "INSERT INTO users (id, email, password_hash, name, role, org, title, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (uid, email.lower(), password_hash, name, role, org, title, now),
+        )
+        _connect().commit()
+    return uid
+
+
+def get_user(user_id: str) -> Optional[dict]:
+    with _lock:
+        row = _connect().execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    return _row_user(row) if row else None
+
+
+def get_user_by_email(email: str) -> Optional[dict]:
+    with _lock:
+        row = _connect().execute(
+            "SELECT * FROM users WHERE email=?", (email.lower(),)
+        ).fetchone()
+    return _row_user(row) if row else None
+
+
+def save_token(token: str, user_id: str, expires_at: float) -> None:
+    with _lock:
+        _connect().execute(
+            "INSERT INTO auth_tokens (token, user_id, expires_at) VALUES (?,?,?)",
+            (token, user_id, expires_at),
+        )
+        _connect().commit()
+
+
+def get_token(token: str) -> Optional[dict]:
+    with _lock:
+        row = _connect().execute(
+            "SELECT * FROM auth_tokens WHERE token=?", (token,)
+        ).fetchone()
+    if not row:
+        return None
+    return {"token": row["token"], "user_id": row["user_id"], "expires_at": row["expires_at"]}
+
+
+def _row_user(r) -> dict:
+    return {
+        "id": r["id"], "email": r["email"], "password_hash": r["password_hash"],
+        "name": r["name"], "role": r["role"], "org": r["org"], "title": r["title"],
+        "created_at": r["created_at"],
+    }
+
+
 def create_session(*, company_id: str = "acme-logistics", channel: str = "chat",
-                   caller_name: str = "", claimed_identity: str = "guest",
+                   user_id: str = "", caller_name: str = "", claimed_identity: str = "guest",
                    verification: str = "claimed_only", origin: str = "unknown",
                    voice_anomaly: float = 0.0, meta: Optional[dict] = None) -> str:
     sid = f"sess-{uuid.uuid4().hex[:12]}"
     now = time.time()
     with _lock:
         _connect().execute(
-            "INSERT INTO sessions (id, company_id, channel, caller_name, "
+            "INSERT INTO sessions (id, company_id, channel, user_id, caller_name, "
             "claimed_identity, verification, origin, voice_anomaly, "
             "trust_score, created_at, updated_at, meta) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (sid, company_id, channel, caller_name, claimed_identity,
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (sid, company_id, channel, user_id or None, caller_name, claimed_identity,
              verification, origin, voice_anomaly, 100, now, now,
              json.dumps(meta or {})),
         )
@@ -134,12 +225,44 @@ def log_activity(kind: str, summary: str, *, session_id: str = "",
         _connect().commit()
 
 
-def list_sessions(limit: int = 30) -> list:
+def list_sessions(limit: int = 30, user_id: str = "") -> list:
     with _lock:
-        rows = _connect().execute(
-            "SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ?", (limit,)
-        ).fetchall()
+        if user_id:
+            rows = _connect().execute(
+                "SELECT * FROM sessions WHERE user_id=? ORDER BY updated_at DESC LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+        else:
+            rows = _connect().execute(
+                "SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ?", (limit,)
+            ).fetchall()
     return [_row_session(r) for r in rows]
+
+
+def user_dashboard(user_id: str) -> dict:
+    with _lock:
+        c = _connect()
+        sessions = c.execute(
+            "SELECT COUNT(*) FROM sessions WHERE user_id=?", (user_id,)
+        ).fetchone()[0]
+        blocks = c.execute(
+            "SELECT COUNT(*) FROM turns t JOIN sessions s ON t.session_id=s.id "
+            "WHERE s.user_id=? AND t.verdict='BLOCK'", (user_id,)
+        ).fetchone()[0]
+        allows = c.execute(
+            "SELECT COUNT(*) FROM turns t JOIN sessions s ON t.session_id=s.id "
+            "WHERE s.user_id=? AND t.verdict='ALLOW'", (user_id,)
+        ).fetchone()[0]
+        recent = c.execute(
+            "SELECT * FROM sessions WHERE user_id=? ORDER BY updated_at DESC LIMIT 8",
+            (user_id,),
+        ).fetchall()
+    return {
+        "sessions": sessions,
+        "blocks": blocks,
+        "allows": allows,
+        "recent": [_row_session(r) for r in recent],
+    }
 
 
 def get_session(session_id: str) -> Optional[dict]:
@@ -219,6 +342,7 @@ def stats() -> dict:
 def _row_session(r) -> dict:
     return {
         "id": r["id"], "company_id": r["company_id"], "channel": r["channel"],
+        "user_id": r["user_id"] if "user_id" in r.keys() else "",
         "caller_name": r["caller_name"], "claimed_identity": r["claimed_identity"],
         "verification": r["verification"], "origin": r["origin"],
         "voice_anomaly": r["voice_anomaly"], "trust_score": r["trust_score"],

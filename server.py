@@ -34,6 +34,8 @@ from src.core.graph_kb import KnowledgeGraph
 from src.core.retrieval import SentinelRetriever
 from src.core.session import SessionState
 from src.core.threat_memory import threat_memory
+from src.core import auth as auth_mod
+from src.core.company_kb import list_documents, get_document, registry as kb_registry
 from src.core.workspace import Workspace, ingest_pdf, upload_company
 from src.middleware import twilio_voice
 from src.middleware.stream_simulator import CALLS, get_call, play
@@ -65,9 +67,17 @@ async def _broadcast_state(snap: dict) -> None:
 @app.on_event("startup")
 async def _dashboard_startup():
     os.environ["SENTINEL_DASHBOARD_SERVER"] = "1"
+    auth_mod.ensure_demo_users()
     init_database_size(threat_memory.stats().get("signatures", 0))
     loop = asyncio.get_event_loop()
     register_broadcast(lambda snap: asyncio.run_coroutine_threadsafe(_broadcast_state(snap), loop))
+
+
+def _user_from_request(request: Request) -> Optional[dict]:
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth_mod.resolve_token(auth[7:].strip())
+    return None
 
 
 class EvalBody(BaseModel):
@@ -84,6 +94,11 @@ class EvalBody(BaseModel):
 
 @app.get("/")
 def index():
+    return FileResponse(os.path.join(STATIC_DIR, "app.html"))
+
+
+@app.get("/workspace")
+def workspace_legacy():
     return FileResponse(os.path.join(STATIC_DIR, "workspace.html"))
 
 
@@ -423,6 +438,66 @@ def scenarios():
     ]}
 
 
+# --- Auth -------------------------------------------------------------------
+
+class LoginBody(BaseModel):
+    email: str
+    password: str
+
+
+class RegisterBody(BaseModel):
+    email: str
+    password: str
+    name: str = ""
+    org: str = ""
+
+
+@app.post("/api/auth/login")
+def auth_login(body: LoginBody):
+    return auth_mod.login(body.email, body.password)
+
+
+@app.post("/api/auth/register")
+def auth_register(body: RegisterBody):
+    return auth_mod.register(body.email, body.password, body.name, org=body.org)
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    user = _user_from_request(request)
+    if not user:
+        return {"error": "not authenticated"}
+    return {"user": user}
+
+
+@app.get("/api/auth/demo-accounts")
+def auth_demo_accounts():
+    return {"accounts": auth_mod.demo_accounts_public()}
+
+
+@app.get("/api/dashboard")
+def user_dashboard(request: Request):
+    user = _user_from_request(request)
+    if not user:
+        return {"error": "login required"}
+    dash = db.user_dashboard(user["id"])
+    return {"user": user, **dash, "threat_memory": threat_memory.stats(),
+            "kb": kb_registry.stats("acme-logistics")}
+
+
+@app.get("/api/knowledge")
+def knowledge_list(company_id: str = "acme-logistics"):
+    return {"company_id": company_id, "documents": list_documents(company_id)}
+
+
+@app.get("/api/knowledge/{doc_id}")
+def knowledge_doc(doc_id: str, company_id: str = "acme-logistics"):
+    doc = get_document(company_id, doc_id)
+    if not doc:
+        return {"error": "not found"}
+    return doc
+
+
 # --- Sentinel Workspace (persistent multi-turn evaluation) -----------------
 
 class WorkspaceSessionBody(BaseModel):
@@ -465,13 +540,19 @@ def workspace_company_upload(body: CompanyUploadBody):
 
 
 @app.post("/api/workspace/sessions")
-def workspace_create_session(body: WorkspaceSessionBody):
-    return _workspace.create_session(**body.model_dump())
+def workspace_create_session(body: WorkspaceSessionBody, request: Request):
+    user = _user_from_request(request)
+    return _workspace.create_session(
+        **body.model_dump(),
+        user_id=user["id"] if user else "",
+    )
 
 
 @app.get("/api/workspace/sessions")
-def workspace_list_sessions(limit: int = 30):
-    return {"sessions": db.list_sessions(limit)}
+def workspace_list_sessions(request: Request, limit: int = 30, mine: bool = False):
+    user = _user_from_request(request)
+    uid = user["id"] if (mine and user) else ""
+    return {"sessions": db.list_sessions(limit, user_id=uid)}
 
 
 @app.get("/api/workspace/sessions/{session_id}")

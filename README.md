@@ -16,7 +16,7 @@ Repository: https://github.com/Behruz1306/sentinel-memory. Demo runbook: see DEM
 
 To run the tests: `.venv/bin/python -m pytest -q`. They are offline and deterministic, so they pass with no API keys.
 
-One command demo, after the setup below: run `./run_demo.sh` and open http://localhost:8000. The main surface is **Sentinel Workspace** — one window where judges pick an industry pack (Logistics, Healthcare, Fintech), run full multi turn conversations, upload company JSON or PDF, watch trust decisions live, and see collective memory grow in SQLite. Twilio calls use the same pipeline. JSON and PDF session reports export from the UI. Legacy Command Center: `/legacy`. Live: https://sentinel-memory.onrender.com/
+One command demo, after the setup below: run `./run_demo.sh` and open http://localhost:8000. The main surface is the **Sentinel Memory app** — sign in with demo accounts (`analyst@sentinel.io` / `demo123`, `judge@moss.io` / `moss2026`), evaluate real caller requests against protected knowledge, browse the knowledge base with sensitivity tags, and export audit reports. Industry packs: Logistics, Healthcare, Fintech. Legacy workspace: `/workspace`. Command Center: `/legacy`. Live: https://sentinel-memory.onrender.com/
 
 ---
 

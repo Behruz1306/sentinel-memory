@@ -179,3 +179,40 @@ def kb_from_payload(payload: dict, company_id: str = "custom") -> KnowledgeGraph
 
 # module singleton
 registry = CompanyKBRegistry()
+
+
+def list_documents(company_id: str) -> list:
+    kb = registry.get(company_id)
+    out = []
+    for doc in kb.docs.values():
+        preview = (doc.content or "")[:200]
+        if len(doc.content or "") > 200:
+            preview += "…"
+        out.append({
+            "id": doc.id,
+            "title": doc.title,
+            "category": doc.category,
+            "sensitivity": doc.sensitivity,
+            "required_permission": doc.required_permission,
+            "preview": preview,
+            "chars": len(doc.content or ""),
+        })
+    out.sort(key=lambda d: (_sens_order(d["sensitivity"]), d["title"]))
+    return out
+
+
+def get_document(company_id: str, doc_id: str) -> Optional[dict]:
+    kb = registry.get(company_id)
+    doc = kb.docs.get(doc_id)
+    if not doc:
+        return None
+    return {
+        "id": doc.id, "title": doc.title, "category": doc.category,
+        "sensitivity": doc.sensitivity, "required_permission": doc.required_permission,
+        "content": doc.content, "pii_fields": len(doc.pii or []),
+    }
+
+
+def _sens_order(s: str) -> int:
+    order = {"PUBLIC": 0, "INTERNAL": 1, "CONFIDENTIAL": 2, "RESTRICTED": 3, "FINANCIAL": 4}
+    return order.get(s.upper(), 2)

@@ -91,14 +91,14 @@ class Workspace:
         self.retriever = retriever
 
     def create_session(self, *, company_id: str = "acme-logistics", channel: str = "chat",
-                       caller_name: str = "", claimed_identity: str = "guest",
+                       user_id: str = "", caller_name: str = "", claimed_identity: str = "guest",
                        verification: str = "claimed_only", origin: str = "unknown",
                        voice_anomaly: float = 0.0, verified_user_id: Optional[str] = None,
                        meta: Optional[dict] = None) -> dict:
         sid = store.create_session(
-            company_id=company_id, channel=channel, caller_name=caller_name,
-            claimed_identity=claimed_identity, verification=verification,
-            origin=origin, voice_anomaly=voice_anomaly, meta=meta,
+            company_id=company_id, channel=channel, user_id=user_id,
+            caller_name=caller_name, claimed_identity=claimed_identity,
+            verification=verification, origin=origin, voice_anomaly=voice_anomaly, meta=meta,
         )
         sessions.open(
             sid, caller_id=sid, claimed_identity=claimed_identity,
