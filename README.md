@@ -161,6 +161,8 @@ open http://localhost:8000
 
 No keys, no problem. Everything still runs. Retrieval falls back to a local index, trust scoring stays deterministic, and breaches log to `security_events.jsonl`.
 
+To deploy on AWS without Docker on your laptop, add AWS keys as GitHub Actions secrets and push to main. GitHub builds the container and pushes it to Amazon ECR; you then create an App Runner service pointing at that image. Full steps are in DEPLOY_AWS.md.
+
 ---
 
 ## The three minute demo script

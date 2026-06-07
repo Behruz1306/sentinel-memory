@@ -1,0 +1,76 @@
+# Build the Sentinel server image in GitHub and push to Amazon ECR.
+# No Docker required on your Mac — push to main (or "Run workflow") and ECR updates.
+#
+# Required GitHub repository secrets (Settings → Secrets → Actions):
+#   AWS_ACCESS_KEY_ID
+#   AWS_SECRET_ACCESS_KEY
+# Optional repository variables (Settings → Variables → Actions):
+#   AWS_REGION          default: us-east-1
+#   ECR_REPOSITORY      default: sentinel
+
+name: Deploy to ECR
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "requirements-server.txt"
+      - ".dockerignore"
+      - "server.py"
+      - "src/**"
+      - "static/**"
+      - ".github/workflows/deploy-ecr.yml"
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'sentinel' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Ensure ECR repository exists
+        run: |
+          aws ecr describe-repositories --repository-names "${ECR_REPOSITORY}" >/dev/null 2>&1 \
+            || aws ecr create-repository --repository-name "${ECR_REPOSITORY}" >/dev/null
+          echo "ECR repository: ${ECR_REPOSITORY}"
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tags
+        id: meta
+        run: |
+          REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          IMAGE="${REGISTRY}/${ECR_REPOSITORY}"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "tags=${IMAGE}:latest,${IMAGE}:${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+
+      - name: Print image URI (for App Runner)
+        run: |
+          echo "Pushed: ${{ steps.meta.outputs.image }}:latest"
+          echo "Use this URI when creating or updating the App Runner service."
+          echo "Health check: /api/health   Port: 8000"
