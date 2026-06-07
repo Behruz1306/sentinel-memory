@@ -16,7 +16,7 @@ Repository: https://github.com/Behruz1306/sentinel-memory. Demo runbook: see DEM
 
 To run the tests: `.venv/bin/python -m pytest -q`. They are offline and deterministic, so they pass with no API keys.
 
-One command demo, after the setup below: run `./run_demo.sh` and open http://localhost:8000. We have verified live: Moss semantic retrieval, a LiveKit voice agent registered as `sentinel`, in browser voice with a real time trust gated verdict stream, and a one hundred percent red team defense rate.
+One command demo, after the setup below: run `./run_demo.sh` and open http://localhost:8000. The Live Command Center tab streams four real time panels over WebSocket: live transcript with a trust score chart and voice biometrics, predictive Moss pre fetch events, a Moss threat memory matrix, and a self learning immune system counter with toast alerts. We have verified live: Moss semantic retrieval, a LiveKit voice agent registered as `sentinel`, in browser voice with a real time trust gated verdict stream, and a one hundred percent red team defense rate.
 
 ---
 

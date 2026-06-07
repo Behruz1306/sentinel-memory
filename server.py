@@ -7,10 +7,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import uuid
-from typing import Optional
+from typing import Any, Optional
 
 try:
     from dotenv import load_dotenv
@@ -18,13 +19,14 @@ try:
 except Exception:
     pass
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src.core import llm
 from src.core.cloudwatch import security_log
+from src.core.dashboard_bus import init_database_size, patch, register_broadcast, snapshot
 from src.core.graph_kb import KnowledgeGraph
 from src.core.retrieval import SentinelRetriever
 from src.core.session import SessionState
@@ -40,6 +42,26 @@ _retriever = SentinelRetriever(_kb)
 _pipeline = SentinelPipeline(_kb)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+_ws_clients: set[WebSocket] = set()
+
+
+async def _broadcast_state(snap: dict) -> None:
+    dead = []
+    for ws in list(_ws_clients):
+        try:
+            await ws.send_json(snap)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _ws_clients.discard(ws)
+
+
+@app.on_event("startup")
+async def _dashboard_startup():
+    os.environ["SENTINEL_DASHBOARD_SERVER"] = "1"
+    init_database_size(threat_memory.stats().get("signatures", 0))
+    loop = asyncio.get_event_loop()
+    register_broadcast(lambda snap: asyncio.run_coroutine_threadsafe(_broadcast_state(snap), loop))
 
 
 class EvalBody(BaseModel):
@@ -68,7 +90,75 @@ def health():
         "breach_sink": security_log.sink,
         "kb": _kb.stats(),
         "threat_memory": threat_memory.stats(),
+        "stream": snapshot(),
     }
+
+
+@app.get("/api/stream/state")
+def stream_state():
+    return snapshot()
+
+
+@app.get("/api/security/status")
+def security_status():
+    """Live security posture for the command-center dashboard."""
+    snap = snapshot()
+    tm = threat_memory.stats()
+    return {
+        **snap,
+        "threat_memory": tm,
+        "retrieval_backend": _retriever.backend,
+    }
+
+
+class StreamPushBody(BaseModel):
+    """Partial or full dashboard snapshot (from external workers via HTTP)."""
+    session_id: Optional[str] = None
+    transcript: Optional[str] = None
+    interim: Optional[str] = None
+    trust_score: Optional[int] = None
+    trust_history: Optional[list] = None
+    voice_anomaly: Optional[float] = None
+    deepfake_pct: Optional[float] = None
+    cache_status: Optional[str] = None
+    prefetch_events: Optional[list] = None
+    prefetch_entity: Optional[str] = None
+    prefetch_latency_ms: Optional[float] = None
+    response_latency_ms: Optional[float] = None
+    threat_logs: Optional[list] = None
+    threat_match: Optional[str] = None
+    database_size: Optional[int] = None
+    active_alerts: Optional[list] = None
+    immune_learned: Optional[Any] = None
+    engines: Optional[list] = None
+    consensus: Optional[dict] = None
+    last_event: Optional[str] = None
+    updated_at: Optional[float] = None
+
+
+@app.post("/api/stream/push")
+async def stream_push(body: StreamPushBody):
+    patch(**body.model_dump(exclude_none=True))
+    return {"ok": True}
+
+
+@app.websocket("/api/ws/stream")
+async def ws_stream(websocket: WebSocket):
+    await websocket.accept()
+    _ws_clients.add(websocket)
+    try:
+        await websocket.send_json(snapshot())
+        while True:
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "ping"})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        _ws_clients.discard(websocket)
 
 
 @app.post("/api/evaluate")

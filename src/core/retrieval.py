@@ -99,6 +99,15 @@ class SentinelRetriever:
                           "note": "Cold retrieval (no entity pre-fetched)."}
         predictive["backend"] = self.backend
         predictive["lookup_ms"] = round((time.time() - t0) * 1000, 2)
+        try:
+            from .dashboard_bus import emit
+            if predictive["warm"]:
+                emit("cache_hit", entity=entity or "",
+                     latency_ms=predictive["lookup_ms"])
+            else:
+                emit("cache_cold", latency_ms=predictive["lookup_ms"])
+        except Exception:
+            pass
 
         # 2. gate each candidate against the permission matrix ------------
         docs = []

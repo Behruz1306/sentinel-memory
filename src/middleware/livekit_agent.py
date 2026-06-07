@@ -35,6 +35,8 @@ from livekit.agents import (
 from livekit.plugins import silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
+from ..core import trust_engine as te
+from ..core.dashboard_bus import emit as dash_emit
 from ..core.graph_kb import KnowledgeGraph
 from ..core.retrieval import SentinelRetriever
 from ..core.session import SessionState
@@ -131,6 +133,22 @@ class SentinelAssistant(Agent):
         )
         data = result.to_dict()
         await self._publish_context(query, data)
+        trust = data.get("trust", {})
+        pred = data.get("predictive") or {}
+        dash_emit(
+            "verdict",
+            decision=data.get("decision"),
+            trust_score=trust.get("score"),
+            response_latency_ms=pred.get("lookup_ms", 0),
+            alert=(f"🚨 RED ALERT: Blocked retrieval — {query[:72]}"
+                   if data.get("decision") == "BLOCK" else None),
+        )
+        threat = trust.get("threat") or {}
+        if threat.get("engines"):
+            dash_emit("trust_update", score=trust.get("score"),
+                      engines=threat["engines"],
+                      consensus=threat.get("consensus", {}),
+                      voice_anomaly=self._sec.voice_anomaly)
 
         if data["decision"] == "BLOCK":
             logger.warning("Sentinel BLOCKED query=%r trust=%s",
@@ -197,14 +215,25 @@ async def entrypoint(ctx: JobContext):
     # Feed live transcripts into the security context: final turns extend the
     # transcript (social-engineering signal); interim tokens warm the predictive
     # cache before the caller finishes — the Moss-paradigm latency win.
+    dash_emit("session_open", session_id=security.session_id,
+              voice_anomaly=security.voice_anomaly,
+              trust_score=100 - int(security.voice_anomaly * 65))
+
     @session.on("user_input_transcribed")
     def _on_transcript(ev):
         text = getattr(ev, "transcript", "") or ""
         if getattr(ev, "is_final", False):
             security.transcript = (security.transcript + "\n" + text).strip()
+            security.interim_text = ""
+            tb = te.compute_trust_score(security, use_llm=False)
+            dash_emit("final_transcript", text=security.transcript,
+                      session_id=security.session_id, trust_score=tb.score)
         else:
             security.interim_text = text
             _retriever.predictive.observe(security, text)
+            tb = te.compute_trust_score(security, use_llm=False)
+            dash_emit("interim_transcript", text=text, session_id=security.session_id,
+                      trust_score=tb.score, voice_anomaly=security.voice_anomaly)
 
     await session.start(agent=SentinelAssistant(room=ctx.room, security=security), room=ctx.room)
     await ctx.connect()

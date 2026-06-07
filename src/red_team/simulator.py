@@ -90,6 +90,28 @@ def run_attack(retriever: SentinelRetriever, attack: Attack) -> AttackResult:
         if status not in ("LEAKED",):
             status = "ALLOWED"
 
+    try:
+        from ..core.dashboard_bus import emit
+        verdict = "BLOCK" if status in ("BLOCKED", "REDACTED") else "ALLOW"
+        emit("session_open", session_id=attack.id, voice_anomaly=attack.voice_anomaly,
+             trust_score=trust)
+        emit("final_transcript", text=attack.transcript, session_id=attack.id,
+             trust_score=trust)
+        emit("verdict", decision=verdict, trust_score=trust,
+             alert=(f"🚨 RED ALERT: {attack.name} — {status}"
+                    if status in ("BLOCKED", "REDACTED", "LEAKED") else None))
+        if semantic.get("matched"):
+            emit("threat_detected", text=attack.transcript,
+                 signature_id=semantic.get("signature_id", ""),
+                 signature_label=(semantic.get("signature_id", "")
+                                  .replace("ti-", "").replace("-", " ").title()),
+                 similarity_pct=round(float(semantic.get("score", 0)) * 100, 1),
+                 attack_type=semantic.get("attack_type", ""),
+                 risk=semantic.get("risk", 0),
+                 verdict=verdict, backend=semantic.get("backend", "local"))
+    except Exception:
+        pass
+
     return AttackResult(attack=attack, status=status, trust_score=trust,
                         se_risk=se, priority=_priority(attack, status), detail=detail,
                         semantic=semantic)

@@ -323,11 +323,29 @@ class ThreatMemory:
 
         matched = bool(score >= threshold and attack_type != "none")
         risk = min(100, int(severity * min(1.0, score / max(threshold, 1e-6)))) if matched else 0
-        return ThreatMatch(
+        match = ThreatMatch(
             matched=matched, score=score, attack_type=attack_type, tactic=tactic,
             severity=severity, signature_id=sig_id, matched_text=matched_text,
             backend=backend, risk=risk,
         )
+        if matched or score >= threshold * 0.85:
+            try:
+                from .dashboard_bus import emit
+                sim_pct = round(min(99.9, score * 100), 1)
+                emit(
+                    "threat_detected",
+                    text=text,
+                    signature_id=sig_id,
+                    signature_label=sig_id.replace("ti-", "").replace("-", " ").title(),
+                    similarity_pct=sim_pct,
+                    attack_type=attack_type,
+                    risk=risk,
+                    verdict="BLOCK" if matched else "WATCH",
+                    backend=backend,
+                )
+            except Exception:
+                pass
+        return match
 
     # -- learning (the self-improving immune system) ------------------------
     def learn(self, text: str, *, attack_type: str, tactic: str = "learned",
@@ -348,11 +366,19 @@ class ThreatMemory:
             if any(s.id == sig_id for s in self._signatures):
                 return {"learned": False, "reason": "already known",
                         "signature_id": sig_id, **self.stats()}
+            prev_size = len(self._signatures)
             self._signatures.append(sig)
             self._idf = self._build_idf()
         added_to_moss = self._teach_session(sig)
-        return {"learned": True, "signature_id": sig_id, "persisted": added_to_moss,
-                **self.stats()}
+        out = {"learned": True, "signature_id": sig_id, "persisted": added_to_moss,
+               **self.stats()}
+        try:
+            from .dashboard_bus import emit
+            emit("immune_learned", signature_id=sig_id, text=text,
+                 from_size=prev_size, database_size=out["signatures"])
+        except Exception:
+            pass
+        return out
 
     def _teach_session(self, sig: ThreatSignature) -> bool:
         """Add a learned signature to the live Moss session (+ optional push)."""

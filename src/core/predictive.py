@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import re
 import threading
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 
 # Entity trigger -> a retrieval query seed for the KB.
 ENTITY_MAP = {
@@ -38,6 +39,7 @@ class Prefetch:
     query: str
     hits: list          # [(doc, relevance)]
     warm: bool = True   # already in cache before the utterance finished
+    started_at: float = field(default_factory=time.time)
 
 
 class PredictiveRetriever:
@@ -67,10 +69,26 @@ class PredictiveRetriever:
             session.prefetch_cache[entity] = []
             pf = Prefetch(entity=entity, query=query, hits=[])
             triggered.append(pf)
+            try:
+                from .dashboard_bus import emit
+                label = self._entity_label(entity)
+                emit("prefetch_triggered", entity=entity, label=label)
+            except Exception:
+                pass
             threading.Thread(
                 target=self._warm, args=(session, entity, query, pf), daemon=True
             ).start()
         return triggered
+
+    @staticmethod
+    def _entity_label(entity: str) -> str:
+        labels = {
+            "payroll": "Q2 Payroll", "salary": "Payroll Register",
+            "contract": "Carrier Contract", "agreement": "Carrier Agreement",
+            "invoice": "Invoice / Remittance", "carrier": "Carrier Profile",
+            "bank": "Bank Routing", "routing": "Bank Routing",
+        }
+        return labels.get(entity, entity.title())
 
     def _warm(self, session, entity: str, query: str, pf: Prefetch):
         hits = self._retrieve(query, 4) or []
@@ -78,6 +96,12 @@ class PredictiveRetriever:
         if entity not in session.prefetched_entities:
             session.prefetched_entities.append(entity)
         pf.hits = hits
+        latency_ms = round((time.time() - pf.started_at) * 1000, 2)
+        try:
+            from .dashboard_bus import emit
+            emit("cache_warmed", entity=entity, latency_ms=latency_ms)
+        except Exception:
+            pass
 
     def cached_for(self, session, query: str):
         """Return warmed hits if the final query maps to a prefetched entity."""

@@ -24,6 +24,11 @@
   .pulse{ animation:pulse 1.5s ease-in-out infinite }
   @keyframes ring{0%{box-shadow:0 0 0 0 rgba(244,63,94,.5)}70%{box-shadow:0 0 0 12px rgba(244,63,94,0)}100%{box-shadow:0 0 0 0 rgba(244,63,94,0)}}
   .ring{ animation:ring 1.6s infinite }
+  @keyframes flash{0%,100%{opacity:1}50%{opacity:.35}}
+  .flash{ animation:flash .9s ease-in-out 3 }
+  @keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  .toast{ animation:slideUp .4s ease both }
+  .trust-line{ transition:stroke .35s ease, stroke-width .35s ease }
   .tab.active{ background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff }
   .fade{ animation:fade .35s ease both } @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
   ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:8px}
@@ -52,8 +57,9 @@
   </header>
 
   <!-- Tabs -->
-  <nav class="flex gap-2 mb-6">
-    <button data-tab="firewall" class="tab active px-4 py-2 rounded-xl text-sm font-medium glass">🔥 Firewall Console</button>
+  <nav class="flex flex-wrap gap-2 mb-6">
+    <button data-tab="command" class="tab active px-4 py-2 rounded-xl text-sm font-medium glass">📡 Command Center</button>
+    <button data-tab="firewall" class="tab px-4 py-2 rounded-xl text-sm font-medium glass">🔥 Firewall Console</button>
     <button data-tab="voice" class="tab px-4 py-2 rounded-xl text-sm font-medium glass">🎙️ Live Voice</button>
     <button data-tab="immune" class="tab px-4 py-2 rounded-xl text-sm font-medium glass">🧬 Immune System</button>
     <button data-tab="redteam" class="tab px-4 py-2 rounded-xl text-sm font-medium glass">⚔️ Red Team</button>
@@ -61,8 +67,84 @@
 
   <div id="explain" class="glass rounded-xl px-4 py-2.5 mb-5 text-[12.5px] text-slate-400"></div>
 
+  <!-- Toast stack -->
+  <div id="toasts" class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm pointer-events-none"></div>
+
+  <!-- ============ LIVE COMMAND CENTER (4 quadrants) ============ -->
+  <section id="tab-command" class="grid lg:grid-cols-2 gap-4">
+    <!-- Q1: Live stream + trust chart + voice biometrics -->
+    <div class="glass rounded-2xl p-4 flex flex-col min-h-[340px]">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-sm font-semibold text-slate-200">🎙️ Live Transcript & Trust Stream</h2>
+        <span id="cc-ws" class="text-[10px] mono px-2 py-0.5 rounded bg-white/5 text-slate-500">ws …</span>
+      </div>
+      <div id="cc-transcript" class="flex-1 rounded-xl bg-slate-900/60 border border-white/5 p-3 text-sm text-slate-300 min-h-[72px] leading-relaxed">
+        <span class="text-slate-500">Waiting for live speech… connect Live Voice or run a simulated call.</span>
+      </div>
+      <div class="mt-3 mb-1 flex justify-between text-[10px] text-slate-500">
+        <span>SessionTrustScore (live)</span><span id="cc-trust-val" class="mono text-slate-300">100</span>
+      </div>
+      <svg id="cc-trust-chart" viewBox="0 0 400 80" class="w-full h-20 rounded-lg bg-slate-900/40 border border-white/5" preserveAspectRatio="none">
+        <line x1="0" y1="20" x2="400" y2="20" stroke="rgba(255,255,255,.06)" stroke-width="1"/>
+        <line x1="0" y1="40" x2="400" y2="40" stroke="rgba(255,255,255,.06)" stroke-width="1"/>
+        <line x1="0" y1="60" x2="400" y2="60" stroke="rgba(255,255,255,.06)" stroke-width="1"/>
+        <polyline id="cc-trust-line" class="trust-line" fill="none" stroke="#34d399" stroke-width="2.5" points="0,8 400,8"/>
+      </svg>
+      <div class="mt-3">
+        <div class="flex justify-between text-[10px] mb-1"><span class="text-slate-400">Voice Biometrics — Deepfake Probability</span><span id="cc-df-val" class="mono text-rose-300">0%</span></div>
+        <div class="h-2 rounded-full bg-slate-700/50 overflow-hidden"><div id="cc-df-bar" class="gauge h-full bg-gradient-to-r from-emerald-500 via-amber-400 to-rose-500" style="width:0%"></div></div>
+      </div>
+    </div>
+
+    <!-- Q2: Predictive pre-fetch -->
+    <div class="glass rounded-2xl p-4 min-h-[340px]">
+      <h2 class="text-sm font-semibold text-slate-200 mb-2">🏎 Predictive Pre-fetch Visualizer</h2>
+      <div id="cc-cache-pill" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs mono bg-slate-700/50 text-slate-400 mb-3">● Cold Base</div>
+      <div id="cc-prefetch-banner" class="hidden rounded-xl px-3 py-2.5 mb-3 text-xs border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 flash"></div>
+      <div id="cc-prefetch-hit" class="hidden rounded-xl px-3 py-2.5 mb-3 text-xs border border-emerald-500/30 bg-emerald-500/10 text-emerald-200"></div>
+      <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Event log</div>
+      <div id="cc-prefetch-log" class="space-y-1.5 max-h-[180px] overflow-y-auto text-[11px] mono text-slate-400">
+        <div class="text-slate-600">No pre-fetch events yet.</div>
+      </div>
+      <div id="cc-latency" class="mt-3 text-[11px] text-slate-400"></div>
+    </div>
+
+    <!-- Q3: Moss threat matrix -->
+    <div class="glass rounded-2xl p-4 min-h-[340px]">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-sm font-semibold text-slate-200">🛡 Moss Threat Memory Matrix</h2>
+        <span class="text-[10px] text-fuchsia-300 mono">semantic IDS</span>
+      </div>
+      <div class="overflow-x-auto max-h-[280px] overflow-y-auto">
+        <table class="w-full text-[11px]">
+          <thead class="text-slate-500 text-left sticky top-0 bg-slate-900/90">
+            <tr><th class="py-1 pr-2">Utterance</th><th class="py-1 pr-2">Nearest signature</th><th class="py-1 pr-2">Sim</th><th class="py-1">Verdict</th></tr>
+          </thead>
+          <tbody id="cc-threat-rows" class="text-slate-300">
+            <tr><td colspan="4" class="py-6 text-center text-slate-600">Firewall logs appear here during calls or Red Team.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Q4: Self-learning immune system -->
+    <div class="glass rounded-2xl p-4 min-h-[340px] flex flex-col">
+      <h2 class="text-sm font-semibold text-slate-200 mb-3">🤖 Self-Learning Immune System</h2>
+      <div class="flex-1 flex flex-col items-center justify-center">
+        <div class="text-[10px] uppercase tracking-widest text-slate-500 mb-1">Database Size</div>
+        <div id="cc-db-size" class="text-5xl font-bold text-fuchsia-300 mono tabular-nums">—</div>
+        <div class="text-xs text-slate-500 mt-1">attack signatures loaded</div>
+      </div>
+      <div id="cc-alerts" class="mt-4 space-y-1.5 max-h-[120px] overflow-y-auto"></div>
+      <div class="mt-3 flex gap-2">
+        <button id="cc-sim-call" class="flex-1 glass hover:bg-white/10 rounded-xl px-3 py-2 text-xs text-slate-300">▶ Simulate deepfake call</button>
+        <button id="cc-redteam" class="flex-1 glass hover:bg-white/10 rounded-xl px-3 py-2 text-xs text-slate-300">▶ Fire Red Team</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ FIREWALL CONSOLE ============ -->
-  <section id="tab-firewall" class="grid lg:grid-cols-2 gap-5">
+  <section id="tab-firewall" class="hidden grid lg:grid-cols-2 gap-5">
     <div class="glass rounded-2xl p-5">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-sm font-semibold text-slate-200">Simulated retrieval request</h2>
@@ -229,6 +311,7 @@ let SCEN=[];
 
 // Tabs
 const EXPLAIN={
+  command:"<b class='text-slate-200'>Live Command Center</b> — four real-time panels wired over WebSocket: <b class='text-emerald-300'>live transcript + trust chart</b>, <b class='text-cyan-300'>predictive Moss pre-fetch</b>, <b class='text-fuchsia-300'>semantic threat matrix</b>, and <b class='text-rose-300'>self-learning immune system</b>. Run Live Voice, simulate a call, or fire Red Team to watch it live.",
   firewall:"<b class='text-slate-200'>Firewall Console</b> — type any request + caller context. Sentinel scores the session with a <b class='text-indigo-300'>dual-analyst consensus (MiniMax + Qwen)</b> + identity verification, then ALLOWs / REDACTs / BLOCKs each document. “Compare” shows a naïve RAG leaking the same data.",
   voice:"<b class='text-slate-200'>Live Voice</b> — actually <b>call the AI agent</b> in your browser (LiveKit). It retrieves from Moss to answer, but every lookup is gated by Sentinel live. Try claiming to be the CEO over a spoofed line — it gets blocked; verified — it answers.",
   immune:"<b class='text-slate-200'>Immune System</b> — the <b class='text-fuchsia-300'>unusual use of Moss</b>: a second index stores <em>attacks</em>, so every utterance is matched against known attacks via Moss semantic search (a vector-native IDS), catching paraphrased attacks regex misses — and it <b>learns</b> new ones at runtime.",
@@ -238,10 +321,10 @@ function setExplain(t){ $('#explain').innerHTML=EXPLAIN[t]; }
 $$('.tab').forEach(b=>b.onclick=()=>{
   $$('.tab').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
-  ['firewall','voice','immune','redteam'].forEach(t=>$('#tab-'+t).classList.toggle('hidden', t!==b.dataset.tab));
+  ['command','firewall','voice','immune','redteam'].forEach(t=>$('#tab-'+t).classList.toggle('hidden', t!==b.dataset.tab));
   setExplain(b.dataset.tab);
 });
-setExplain('firewall');
+setExplain('command');
 
 // Health pills
 (async()=>{
@@ -421,6 +504,10 @@ function pushStream(d){
     ${(d.reasons||[]).slice(0,2).map(r=>`<div class="text-[11px] text-slate-400">↳ ${r}</div>`).join('')}
     <div class="mt-1.5 flex flex-wrap gap-1">${(d.docs||[]).map(x=>`<span class="text-[10px] px-1.5 py-0.5 rounded ${BADGE[x.decision]}">${x.title}: ${x.decision}</span>`).join('')}</div>`;
   $('#stream').prepend(card);
+  renderCommandCenter({trust_score:d.trust, transcript:d.query||'', threat_logs:[{
+    text:d.query, signature_label:(th.semantic||{}).signature_id||th.attack_type||'',
+    similarity_pct:Math.round(((th.semantic||{}).score||0)*100), verdict:dec,
+    attack_type:th.attack_type||''}]});
 }
 
 // ---------- Immune System (Moss threat memory) ----------
@@ -467,6 +554,136 @@ $('#im-learn').onclick=async()=>{
   renderImResult(d,!!d.learned); loadMemory();
 };
 loadMemory();
+
+// ---------- Live Command Center (WebSocket) ----------
+let _lastLearnTs=0, _ws=null;
+function trustColor(s){ return s>=70?'#34d399':s>=40?'#fbbf24':'#f43f5e'; }
+
+function showToast(html, kind='learn'){
+  const t=document.createElement('div');
+  t.className='toast glass rounded-xl px-4 py-3 text-xs border pointer-events-auto '+
+    (kind==='learn'?'border-fuchsia-500/40 bg-fuchsia-500/15 text-fuchsia-100':'border-rose-500/40 bg-rose-500/15 text-rose-100');
+  t.innerHTML=html;
+  $('#toasts').prepend(t);
+  setTimeout(()=>t.remove(), 6000);
+}
+
+function renderCommandCenter(s){
+  if(!s||s.type==='ping') return;
+  const interim=s.interim||'', final=s.transcript||'';
+  const live=interim||final;
+  if(live){
+    const tail=interim?`<span class="text-white">${final}</span><span class="text-cyan-300 animate-pulse">${interim}</span>`:
+      `<span class="text-white">${final}</span>`;
+    $('#cc-transcript').innerHTML=tail;
+  }
+  const ts=s.trust_score??100;
+  $('#cc-trust-val').textContent=ts+'/100';
+  $('#cc-trust-val').style.color=trustColor(ts);
+  const hist=(s.trust_history||[]).slice(-40);
+  if(hist.length){
+    const pts=hist.map((p,i)=>{
+      const x=hist.length<2?0:(i/(hist.length-1))*400;
+      const y=80-(p.score/100)*72;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const line=$('#cc-trust-line');
+    line.setAttribute('points',pts);
+    line.setAttribute('stroke',trustColor(ts));
+    line.setAttribute('stroke-width', ts<50?'3.5':'2.5');
+  }
+  const df=s.deepfake_pct??Math.round((s.voice_anomaly||0)*100);
+  $('#cc-df-val').textContent=df+'%';
+  $('#cc-df-bar').style.width=df+'%';
+
+  const cs=s.cache_status||'cold';
+  const pill=$('#cc-cache-pill');
+  if(cs==='warmed'){
+    pill.className='inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs mono border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 mb-3';
+    pill.textContent='🟢 Cache Warmed'+(s.prefetch_latency_ms!=null?` (${s.prefetch_latency_ms}ms)`:'');
+  } else if(cs==='warming'){
+    pill.className='inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs mono border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 mb-3 flash';
+    pill.textContent='⚡ Warming via Predictive Engine…';
+  } else {
+    pill.className='inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs mono bg-slate-700/50 text-slate-400 mb-3';
+    pill.textContent='● Cold Base';
+  }
+  const pev=(s.prefetch_events||[])[0];
+  if(pev&&pev.event==='prefetch_triggered'){
+    $('#cc-prefetch-banner').classList.remove('hidden');
+    $('#cc-prefetch-banner').textContent=`⚡ Predictive Pre-fetch Triggered: Sourcing "${pev.label||pev.entity}" from Moss Knowledge Graph…`;
+  }
+  const warmed=(s.prefetch_events||[]).find(e=>e.event==='cache_warmed');
+  if(warmed){
+    $('#cc-prefetch-hit').classList.remove('hidden');
+    $('#cc-prefetch-hit').textContent=`🟢 Cache Warmed (${warmed.latency_ms}ms) — entity "${warmed.entity}"`;
+  }
+  const log=s.prefetch_events||[];
+  $('#cc-prefetch-log').innerHTML=log.length?log.map(e=>{
+    const t=new Date(e.ts*1000).toLocaleTimeString();
+    if(e.event==='prefetch_triggered') return `<div class="text-cyan-300/80">[${t}] ⚡ trigger → ${e.entity}</div>`;
+    if(e.event==='cache_warmed') return `<div class="text-emerald-300/80">[${t}] 🟢 warmed ${e.entity} (${e.latency_ms}ms)</div>`;
+    if(e.event==='cache_hit') return `<div class="text-emerald-300/70">[${t}] hit cache ${e.entity||'—'} (${e.latency_ms}ms)</div>`;
+    return `<div>[${t}] ${e.event}</div>`;
+  }).join(''):'<div class="text-slate-600">No pre-fetch events yet.</div>';
+  if(s.response_latency_ms!=null&&s.cache_status==='warmed'){
+    $('#cc-latency').innerHTML=`<span class="text-emerald-300">System Response Latency: ${s.response_latency_ms}ms</span> <span class="text-slate-500">(data pulled from local cache)</span>`;
+  } else if(s.response_latency_ms!=null){
+    $('#cc-latency').textContent=`Cold retrieval: ${s.response_latency_ms}ms`;
+  }
+
+  const logs=s.threat_logs||[];
+  if(logs.length){
+    $('#cc-threat-rows').innerHTML=logs.slice(0,30).map(r=>{
+      const hot=r.verdict==='BLOCK';
+      const sig=r.signature_label||r.signature||'—';
+      return `<tr class="border-t border-white/5 fade">
+        <td class="py-2 pr-2 max-w-[140px] truncate" title="${r.text}">"${(r.text||'').slice(0,36)}…"</td>
+        <td class="py-2 pr-2 text-fuchsia-300">${sig}</td>
+        <td class="py-2 pr-2 mono">${r.similarity_pct}%</td>
+        <td class="py-2 ${hot?'text-rose-400':'text-amber-300'}">${hot?'🔴 BLOCK':'👁 WATCH'}</td></tr>`;
+    }).join('');
+  }
+
+  if(s.database_size!=null) $('#cc-db-size').textContent=s.database_size;
+  const alerts=s.active_alerts||[];
+  $('#cc-alerts').innerHTML=alerts.slice(0,5).map(a=>
+    `<div class="text-[11px] px-2 py-1.5 rounded-lg ${a.level==='critical'?'bg-rose-500/15 text-rose-300 ring ring-rose-500/30':'bg-amber-500/10 text-amber-200'}">${a.message}</div>`
+  ).join('');
+
+  const il=s.immune_learned;
+  if(il&&il.ts&&il.ts!==_lastLearnTs){
+    _lastLearnTs=il.ts;
+    showToast(`✨ Immune System self-learned a new threat pattern<br><span class="mono text-[10px]">${il.from_size} → ${il.to_size} signatures · ${il.signature_id}</span>`);
+    $('#cc-db-size').classList.add('flash');
+    setTimeout(()=>$('#cc-db-size').classList.remove('flash'), 2000);
+  }
+}
+
+function connectWS(){
+  const proto=location.protocol==='https:'?'wss':'ws';
+  try{
+    _ws=new WebSocket(`${proto}://${location.host}/api/ws/stream`);
+    _ws.onopen=()=>{$('#cc-ws').textContent='ws live';$('#cc-ws').className='text-[10px] mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300';};
+    _ws.onmessage=e=>{ try{renderCommandCenter(JSON.parse(e.data));}catch(x){} };
+    _ws.onclose=()=>{$('#cc-ws').textContent='ws reconnect…';$('#cc-ws').className='text-[10px] mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-300'; setTimeout(connectWS,2000);};
+  }catch(e){ setTimeout(connectWS,3000); }
+}
+connectWS();
+fetch('/api/stream/state').then(r=>r.json()).then(renderCommandCenter).catch(()=>{});
+
+$('#cc-sim-call').onclick=async()=>{
+  $('#cc-sim-call').textContent='running…';
+  const d=await(await fetch('/api/simulate/call-deepfake-cfo',{method:'POST'})).json();
+  $('#cc-sim-call').textContent='▶ Simulate deepfake call';
+  if(d.events) renderCommandCenter(await(await fetch('/api/stream/state')).json());
+};
+$('#cc-redteam').onclick=async()=>{
+  $('#cc-redteam').textContent='firing…';
+  await fetch('/api/redteam',{method:'POST'});
+  $('#cc-redteam').textContent='▶ Fire Red Team';
+  renderCommandCenter(await(await fetch('/api/stream/state')).json());
+};
 </script>
 </body>
 </html>

@@ -40,7 +40,23 @@ class SentinelPipeline:
         """Feed an interim STT token; returns entities pre-fetched this tick."""
         session.add_interim(token)
         triggered = self.retriever.predictive.observe(session, session.interim_text)
+        self._emit_interim(session)
         return [t.entity for t in triggered]
+
+    def _emit_interim(self, session: SessionState) -> None:
+        try:
+            from ..core import trust_engine as te
+            from ..core.dashboard_bus import emit
+            tb = te.compute_trust_score(session, use_llm=False)
+            emit(
+                "interim_transcript",
+                text=session.interim_text,
+                session_id=session.session_id,
+                trust_score=tb.score,
+                voice_anomaly=session.voice_anomaly,
+            )
+        except Exception:
+            pass
 
     def on_final(self, session: SessionState, text: str, *,
                  intent: str = "read", raise_on_deny: bool = True) -> PipelineTurn:
@@ -51,12 +67,39 @@ class SentinelPipeline:
             result = self.retriever.execute(
                 session, query, intent=intent, raise_on_deny=raise_on_deny
             )
+            self._emit_final(session, text, result.to_dict())
             return PipelineTurn(
                 query=query, decision=result.decision,
                 denied=(result.decision == "BLOCK"), result=result.to_dict(),
             )
         except AccessDeniedException as e:
+            self._emit_final(session, text, None, decision="BLOCK")
             return PipelineTurn(
                 query=query, decision="BLOCK", denied=True,
                 result=None, breach=e.breach,
             )
+
+    def _emit_final(self, session: SessionState, text: str, result: Optional[dict],
+                    *, decision: str = "ALLOW") -> None:
+        try:
+            from ..core.dashboard_bus import emit
+            trust = (result or {}).get("trust", {})
+            emit("final_transcript", text=text, session_id=session.session_id,
+                 trust_score=trust.get("score", session.trust_score))
+            if result:
+                pred = result.get("predictive") or {}
+                emit(
+                    "verdict",
+                    decision=result.get("decision", decision),
+                    trust_score=trust.get("score"),
+                    response_latency_ms=pred.get("lookup_ms", 0),
+                    alert=(f"🚨 RED ALERT: Access Denied — {text[:60]}"
+                           if result.get("decision") == "BLOCK" else None),
+                )
+                threat = trust.get("threat") or {}
+                if threat.get("engines"):
+                    emit("trust_update", score=trust.get("score"),
+                         engines=threat["engines"],
+                         consensus=threat.get("consensus", {}))
+        except Exception:
+            pass
