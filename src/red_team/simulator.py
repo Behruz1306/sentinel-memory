@@ -89,8 +89,14 @@ def run_attack(retriever: SentinelRetriever, attack: Attack) -> AttackResult:
 
 
 def run_campaign(attacks=None):
+    from concurrent.futures import ThreadPoolExecutor
+
     retriever = SentinelRetriever()
-    results = [run_attack(retriever, a) for a in (attacks or ATTACKS)]
+    items = list(attacks or ATTACKS)
+    # Run attacks concurrently — each makes its own (slow) LLM call, so threads
+    # turn a ~minute of sequential analysis into a few seconds.
+    with ThreadPoolExecutor(max_workers=min(8, len(items))) as pool:
+        results = list(pool.map(lambda a: run_attack(retriever, a), items))
     breached = sum(1 for r in results if r.status == "LEAKED")
     defended = len(results) - breached
     return {

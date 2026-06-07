@@ -57,6 +57,8 @@
     <button data-tab="redteam" class="tab px-4 py-2 rounded-xl text-sm font-medium glass">⚔️ Red Team</button>
   </nav>
 
+  <div id="explain" class="glass rounded-xl px-4 py-2.5 mb-5 text-[12.5px] text-slate-400"></div>
+
   <!-- ============ FIREWALL CONSOLE ============ -->
   <section id="tab-firewall" class="grid lg:grid-cols-2 gap-5">
     <div class="glass rounded-2xl p-5">
@@ -123,6 +125,7 @@
           <div class="glass-2 rounded-xl py-2.5"><div class="text-[10px] text-slate-400">deepfake</div><div id="m-df" class="mono text-base text-rose-300"></div></div>
           <div class="glass-2 rounded-xl py-2.5"><div class="text-[10px] text-slate-400">SE risk</div><div id="m-se" class="mono text-base text-amber-300"></div></div>
         </div>
+        <div id="threat" class="hidden mb-3 rounded-xl p-3 border"></div>
         <div id="pred" class="hidden text-xs mb-3 px-3 py-2 rounded-xl bg-cyan-500/10 text-cyan-300 border border-cyan-500/20"></div>
         <div id="sig" class="flex flex-wrap gap-1.5 mb-3"></div>
         <ul id="reasons" class="text-[13px] text-slate-300 space-y-1 mb-3 list-disc list-inside marker:text-indigo-400"></ul>
@@ -193,11 +196,19 @@ const PRIO={CRITICAL:"text-rose-400",HIGH:"text-amber-400",MEDIUM:"text-cyan-400
 let SCEN=[];
 
 // Tabs
+const EXPLAIN={
+  firewall:"<b class='text-slate-200'>Firewall Console</b> — type any request + caller context. Sentinel scores the session with <b class='text-indigo-300'>MiniMax-M3</b> threat analysis + identity verification, then ALLOWs / REDACTs / BLOCKs each document. “Compare” shows a naïve RAG leaking the same data.",
+  voice:"<b class='text-slate-200'>Live Voice</b> — actually <b>call the AI agent</b> in your browser (LiveKit). It retrieves from Moss to answer, but every lookup is gated by Sentinel live. Try claiming to be the CEO over a spoofed line — it gets blocked; verified — it answers.",
+  redteam:"<b class='text-slate-200'>Red Team</b> — fires deepfake, prompt-injection and wire-fraud attacks at the firewall and reports the defense rate, so you can prove coverage, not just demo one case."
+};
+function setExplain(t){ $('#explain').innerHTML=EXPLAIN[t]; }
 $$('.tab').forEach(b=>b.onclick=()=>{
   $$('.tab').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
   ['firewall','voice','redteam'].forEach(t=>$('#tab-'+t).classList.toggle('hidden', t!==b.dataset.tab));
+  setExplain(b.dataset.tab);
 });
+setExplain('firewall');
 
 // Health pills
 (async()=>{
@@ -236,6 +247,16 @@ function renderVerdict(d){
   $('#actor').textContent=`trust ${t.score}/100`;
   $('#tv').textContent=t.score+'/100'; $('#tbar').style.width=t.score+'%';
   $('#m-id').textContent=t.identity_trust; $('#m-df').textContent='−'+t.deepfake_penalty; $('#m-se').textContent=t.se_risk;
+  const th=t.threat||{};
+  if(th.reasoning||th.attack_type){
+    const hot=(th.risk??t.se_risk)>=50;
+    $('#threat').classList.remove('hidden');
+    $('#threat').className='mb-3 rounded-xl p-3 border '+(hot?'border-rose-500/40 bg-rose-500/10':'border-emerald-500/30 bg-emerald-500/10');
+    $('#threat').innerHTML=`<div class="flex items-center justify-between mb-1">
+        <span class="text-xs font-semibold ${hot?'text-rose-300':'text-emerald-300'}">🧠 AI threat analysis — ${th.attack_type||'none'}</span>
+        <span class="text-[10px] px-2 py-0.5 rounded bg-white/10 text-slate-300 mono">${th.engine||'engine'} · ${th.confidence??''}% conf</span></div>
+      <div class="text-[12px] text-slate-300 leading-snug">${th.reasoning||''}</div>`;
+  } else $('#threat').classList.add('hidden');
   $('#sig').innerHTML=(t.se_signals||[]).map(s=>`<span class="text-[11px] px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300">${s}</span>`).join('');
   $('#reasons').innerHTML=(d.reasons||[]).map(r=>`<li>${r}</li>`).join('');
   const pf=d.predictive||{};
@@ -334,10 +355,12 @@ function pushStream(d){
   const dec=d.decision||'ALLOW';
   const card=document.createElement('div');
   card.className='glass-2 rounded-xl p-3 fade border '+DBORDER[dec];
+  const th=d.threat||{};
   card.innerHTML=`<div class="flex items-center justify-between mb-1">
       <span class="text-xs text-slate-400 mono">🔎 ${(d.query||'').slice(0,48)}</span>
       <span class="text-[11px] px-2 py-0.5 rounded ${BADGE[dec]}">${dec}</span></div>
-    <div class="text-[11px] text-slate-500 mb-1">trust ${d.trust}/100 · SE ${d.se_risk||0}</div>
+    <div class="text-[11px] text-slate-500 mb-1">trust ${d.trust}/100 · SE ${d.se_risk||0}${th.attack_type?` · <span class="text-rose-300">${th.attack_type}</span>`:''}</div>
+    ${th.reasoning?`<div class="text-[11px] text-slate-300 mb-1">🧠 ${th.reasoning}</div>`:''}
     ${(d.reasons||[]).slice(0,2).map(r=>`<div class="text-[11px] text-slate-400">↳ ${r}</div>`).join('')}
     <div class="mt-1.5 flex flex-wrap gap-1">${(d.docs||[]).map(x=>`<span class="text-[10px] px-1.5 py-0.5 rounded ${BADGE[x.decision]}">${x.title}: ${x.decision}</span>`).join('')}</div>`;
   $('#stream').prepend(card);

@@ -82,8 +82,8 @@ class SentinelRetriever:
         return self.kb.retrieve(query, k)
 
     def execute(self, session, query: str, intent: str = "read",
-                *, raise_on_deny: bool = False) -> RetrievalResult:
-        trust = te.compute_trust_score(session)
+                *, raise_on_deny: bool = False, use_llm: bool = True) -> RetrievalResult:
+        trust = te.compute_trust_score(session, use_llm=use_llm)
         reasons = list(trust.factors)
 
         # 1. predictive warm-cache (Moss paradigm) ------------------------

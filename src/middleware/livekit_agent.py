@@ -95,6 +95,7 @@ class SentinelAssistant(Agent):
                     "decision": result.get("decision"),
                     "trust": result.get("trust", {}).get("score"),
                     "se_risk": result.get("trust", {}).get("se_risk"),
+                    "threat": result.get("trust", {}).get("threat", {}),
                     "reasons": result.get("reasons", [])[:3],
                     "docs": [
                         {"title": d["title"], "sensitivity": d["sensitivity"],
@@ -122,8 +123,11 @@ class SentinelAssistant(Agent):
         """
         # Run the full Sentinel pipeline (trust gate + Moss retrieval + action
         # + breach logging) off the event loop so its sync Moss client is safe.
+        # Fast path on the real-time voice gate (auth + heuristic) so the agent
+        # never stalls mid-conversation waiting on a multi-second LLM call.
         result = await asyncio.to_thread(
-            _retriever.execute, self._sec, query, intent="read", raise_on_deny=False
+            _retriever.execute, self._sec, query, intent="read",
+            raise_on_deny=False, use_llm=False
         )
         data = result.to_dict()
         await self._publish_context(query, data)
