@@ -30,16 +30,24 @@ _PRESETS = {
         "model": "gpt-4o",
     },
     "minimax": {
-        # MiniMax exposes an OpenAI-compatible endpoint.
-        "base_url": "https://api.minimaxi.chat/v1",
+        # MiniMax exposes an OpenAI-compatible endpoint (verified against
+        # platform.minimax.io/docs/api-reference/text-openai-api).
+        "base_url": "https://api.minimax.io/v1",
         "key_env": "MINIMAX_API_KEY",
-        "model": "MiniMax-Text-01",
+        "model": "MiniMax-M3",
     },
 }
 
 _client = None
 _resolved = False
 _info: dict = {"provider": None, "model": None, "ready": False}
+
+# Circuit breaker: after repeated failures (bad key, no balance, unsupported
+# param) we stop calling the API and fall back to deterministic heuristics, so
+# a dead provider never slows the live demo.
+_fail_count = 0
+_FAIL_LIMIT = 2
+_disabled = False
 
 
 def _resolve():
@@ -100,34 +108,38 @@ def complete_json(system: str, user: str, *, max_tokens: int = 400) -> Optional[
     parameter, retries without it and extracts JSON from the text. This keeps
     us safe against provider-specific unsupported params.
     """
+    global _fail_count, _disabled
     _resolve()
-    if _client is None:
+    if _client is None or _disabled:
         return None
     model = _info["model"]
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
+
+    def _trip():
+        global _fail_count, _disabled
+        _fail_count += 1
+        if _fail_count >= _FAIL_LIMIT:
+            _disabled = True
+            _info["ready"] = False
+
     # Attempt 1: strict JSON mode.
     try:
         resp = _client.chat.completions.create(
-            model=model,
-            temperature=0,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
-            messages=messages,
+            model=model, temperature=0, max_tokens=max_tokens,
+            response_format={"type": "json_object"}, messages=messages,
         )
         return _extract_json(resp.choices[0].message.content or "")
     except Exception:
         pass
-    # Attempt 2: plain completion, parse JSON out of the text.
+    # Attempt 2: plain completion (provider may reject response_format).
     try:
         resp = _client.chat.completions.create(
-            model=model,
-            temperature=0,
-            max_tokens=max_tokens,
-            messages=messages,
+            model=model, temperature=0, max_tokens=max_tokens, messages=messages,
         )
         return _extract_json(resp.choices[0].message.content or "")
     except Exception:
+        _trip()
         return None

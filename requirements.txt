@@ -1,9 +1,17 @@
 # Sentinel Memory — secure, predictive, trust-aware retrieval middleware
-# Core (required) — the full pipeline + demo run on these alone.
+# NOTE: Moss SDK requires Python >=3.10. Recommended setup (uv-managed):
+#   uv venv --python 3.12 .venv
+#   uv pip install --python .venv -r requirements.txt
+#
+# Core
 fastapi>=0.110
 uvicorn[standard]>=0.29
 pydantic>=2.6
 python-dotenv>=1.0
+
+# Moss — real-time semantic retrieval (the retrieval backend Sentinel guards).
+# Falls back to a local lexical index if absent.
+moss>=1.4
 
 # --- Optional integrations (everything degrades gracefully if absent) -------
 

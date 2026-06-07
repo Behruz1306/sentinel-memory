@@ -21,6 +21,7 @@ from .actions import detect_action
 from .cloudwatch import security_log
 from .exceptions import AccessDeniedException
 from .graph_kb import KnowledgeGraph
+from .moss_retriever import MossRetriever
 from .predictive import PredictiveRetriever
 from . import trust_engine as te
 
@@ -65,7 +66,20 @@ def _redact(content: str, pii: list) -> str:
 class SentinelRetriever:
     def __init__(self, kb: Optional[KnowledgeGraph] = None):
         self.kb = kb or KnowledgeGraph()
-        self.predictive = PredictiveRetriever(self.kb)
+        self.moss = MossRetriever(self.kb)
+        self.predictive = PredictiveRetriever(self._retrieve)
+
+    @property
+    def backend(self) -> str:
+        return "moss" if self.moss.available else "local"
+
+    def _retrieve(self, query: str, k: int = 4):
+        """Relevance ranking via Moss when available, else the local index."""
+        if self.moss.available:
+            hits = self.moss.retrieve(query, k)
+            if hits:
+                return hits
+        return self.kb.retrieve(query, k)
 
     def execute(self, session, query: str, intent: str = "read",
                 *, raise_on_deny: bool = False) -> RetrievalResult:
@@ -80,14 +94,14 @@ class SentinelRetriever:
             predictive = {"entity": entity, "warm": True,
                           "note": f"Pre-fetched on '{entity}' before utterance finished."}
         else:
-            hits = self.kb.retrieve(query, k=4)
+            hits = self._retrieve(query, 4)
             predictive = {"entity": None, "warm": False,
                           "note": "Cold retrieval (no entity pre-fetched)."}
+        predictive["backend"] = self.backend
         predictive["lookup_ms"] = round((time.time() - t0) * 1000, 2)
 
         # 2. gate each candidate against the permission matrix ------------
-        docs, overall = [], "ALLOW"
-        primary_block = None
+        docs = []
         for doc, rel in hits:
             need = te.required_trust(doc.sensitivity)
             if trust.score > need:
@@ -96,15 +110,21 @@ class SentinelRetriever:
                 decision, served = "REDACT", _redact(doc.content, doc.pii)
             else:
                 decision, served = "BLOCK", "[withheld by Sentinel]"
-                if primary_block is None:
-                    primary_block = (doc, need)
 
             rel_path = (self.kb.relationship_path(session.verified_user_id, doc.id)
                         if session.verified_user_id else [])
             docs.append(DocVerdict(doc.id, doc.title, doc.sensitivity, rel,
                                    need, decision, served, rel_path))
-            if _ORDER[decision] > _ORDER[overall]:
-                overall = decision
+
+        # Headline tracks the MOST RELEVANT document — what the agent actually
+        # asked for. Lower-ranked incidental hits are still gated individually
+        # in their own verdicts (a blocked financial doc stays withheld even if
+        # the headline is ALLOW).
+        overall = docs[0].decision if docs else "ALLOW"
+        primary_block = None
+        if docs and docs[0].decision == "BLOCK":
+            top = hits[0][0]
+            primary_block = (top, te.required_trust(top.sensitivity))
 
         # 3. action-aware workflow ---------------------------------------
         action = None

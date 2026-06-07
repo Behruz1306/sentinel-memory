@@ -61,6 +61,7 @@ def health():
     return {
         "ok": True,
         "llm": llm.llm_info(),
+        "retrieval": _retriever.backend,
         "breach_sink": security_log.sink,
         "kb": _kb.stats(),
     }

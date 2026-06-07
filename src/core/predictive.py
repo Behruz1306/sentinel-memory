@@ -44,11 +44,13 @@ class PredictiveRetriever:
     """Observes interim transcript tokens and warms the cache ahead of time.
 
     Pre-fetch runs in a background thread so it never blocks the audio path —
-    mirroring how a real worker would intercept the live STT stream.
+    mirroring how a real worker would intercept the live STT stream. The
+    retrieval backend is injected (`retrieve_fn`) so the same warm-cache logic
+    works over Moss or the local index.
     """
 
-    def __init__(self, kb):
-        self.kb = kb
+    def __init__(self, retrieve_fn):
+        self._retrieve = retrieve_fn
 
     def observe(self, session, interim_text: str) -> list:
         """Scan newly-heard text; pre-fetch any entity not already warmed.
@@ -71,7 +73,7 @@ class PredictiveRetriever:
         return triggered
 
     def _warm(self, session, entity: str, query: str, pf: Prefetch):
-        hits = self.kb.retrieve(query, k=4)
+        hits = self._retrieve(query, 4) or []
         session.prefetch_cache[entity] = hits
         if entity not in session.prefetched_entities:
             session.prefetched_entities.append(entity)
