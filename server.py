@@ -19,18 +19,23 @@ try:
 except Exception:
     pass
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src.core import llm
+from src.core import persistence as db
 from src.core.cloudwatch import security_log
+from src.core.company_pack import get_pack, list_packs, resolve_company
+from src.core.reports import report_pdf_bytes
 from src.core.dashboard_bus import emit, init_database_size, patch, register_broadcast, snapshot
 from src.core.graph_kb import KnowledgeGraph
 from src.core.retrieval import SentinelRetriever
 from src.core.session import SessionState
 from src.core.threat_memory import threat_memory
+from src.core.workspace import Workspace, ingest_pdf, upload_company
+from src.middleware import twilio_voice
 from src.middleware.stream_simulator import CALLS, get_call, play
 from src.middleware.pipeline import SentinelPipeline
 from src.red_team.simulator import run_campaign
@@ -40,6 +45,7 @@ app = FastAPI(title="Sentinel Memory", version="0.2.0")
 _kb = KnowledgeGraph()
 _retriever = SentinelRetriever(_kb)
 _pipeline = SentinelPipeline(_kb)
+_workspace = Workspace(_retriever)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 _ws_clients: set[WebSocket] = set()
@@ -78,6 +84,12 @@ class EvalBody(BaseModel):
 
 @app.get("/")
 def index():
+    return FileResponse(os.path.join(STATIC_DIR, "workspace.html"))
+
+
+@app.get("/legacy")
+def legacy_dashboard():
+    """Original live command-center (advanced telemetry)."""
     return FileResponse(os.path.join(STATIC_DIR, "dashboard.html"))
 
 
@@ -102,6 +114,7 @@ def health():
         "breach_sink": security_log.sink,
         "kb": _kb.stats(),
         "threat_memory": threat_memory.stats(),
+        "persistence": db.stats(),
         "stream": snapshot(),
     }
 
@@ -408,6 +421,171 @@ def scenarios():
          "query": c.final, "intent": c.intent, "notes": c.notes}
         for c in CALLS
     ]}
+
+
+# --- Sentinel Workspace (persistent multi-turn evaluation) -----------------
+
+class WorkspaceSessionBody(BaseModel):
+    company_id: str = "acme-logistics"
+    channel: str = "chat"
+    caller_name: str = ""
+    claimed_identity: str = "guest"
+    verification: str = "claimed_only"
+    origin: str = "unknown"
+    voice_anomaly: float = 0.0
+    verified_user_id: Optional[str] = None
+
+
+class WorkspaceMessageBody(BaseModel):
+    message: str
+    persona: Optional[dict] = None
+
+
+class CompanyUploadBody(BaseModel):
+    name: str
+    payload: dict
+
+
+@app.get("/api/workspace/company")
+def workspace_company(pack_id: str = "acme-logistics"):
+    active = resolve_company(pack_id)
+    if not active and get_pack(pack_id):
+        active = get_pack(pack_id).to_dict()
+    return {
+        "packs": list_packs(),
+        "uploads": db.list_company_uploads(),
+        "active": active or {},
+        "pack_id": pack_id,
+    }
+
+
+@app.post("/api/workspace/company/upload")
+def workspace_company_upload(body: CompanyUploadBody):
+    return upload_company(body.name, body.payload)
+
+
+@app.post("/api/workspace/sessions")
+def workspace_create_session(body: WorkspaceSessionBody):
+    return _workspace.create_session(**body.model_dump())
+
+
+@app.get("/api/workspace/sessions")
+def workspace_list_sessions(limit: int = 30):
+    return {"sessions": db.list_sessions(limit)}
+
+
+@app.get("/api/workspace/sessions/{session_id}")
+def workspace_get_session(session_id: str):
+    rec = db.get_session(session_id)
+    if not rec:
+        return {"error": "not found"}
+    return rec
+
+
+@app.post("/api/workspace/sessions/{session_id}/message")
+def workspace_message(session_id: str, body: WorkspaceMessageBody):
+    return _workspace.send_message(session_id, body.message, persona=body.persona)
+
+
+@app.get("/api/workspace/sessions/{session_id}/report")
+def workspace_report(session_id: str):
+    return _workspace.report(session_id)
+
+
+@app.get("/api/workspace/sessions/{session_id}/report.pdf")
+def workspace_report_pdf(session_id: str):
+    report = _workspace.report(session_id)
+    if report.get("error"):
+        return report
+    try:
+        pdf = report_pdf_bytes(report)
+    except Exception as e:
+        return {"error": str(e)}
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="sentinel-{session_id}.pdf"'},
+    )
+
+
+@app.post("/api/workspace/company/{company_id}/ingest-pdf")
+async def workspace_ingest_pdf(
+    company_id: str,
+    file: UploadFile = File(...),
+    title: str = "Ingested PDF",
+    sensitivity: str = "CONFIDENTIAL",
+):
+    import tempfile
+    data = await file.read()
+    suffix = ".pdf" if (file.filename or "").lower().endswith(".pdf") else ""
+    fd, path = tempfile.mkstemp(suffix=suffix)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        return ingest_pdf(
+            company_id, path,
+            title=title or file.filename or "PDF",
+            sensitivity=sensitivity,
+        )
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+@app.get("/api/workspace/activity")
+def workspace_activity(limit: int = 40):
+    return {"items": db.activity_feed(limit)}
+
+
+# --- Twilio voice (real phone calls) ---------------------------------------
+
+@app.get("/api/twilio/status")
+def twilio_status():
+    sid = os.getenv("TWILIO_ACCOUNT_SID")
+    num = os.getenv("TWILIO_PHONE_NUMBER")
+    base = (os.getenv("SENTINEL_PUBLIC_URL") or os.getenv("RENDER_EXTERNAL_URL")
+            or "http://localhost:8000").rstrip("/")
+    return {
+        "configured": bool(sid and os.getenv("TWILIO_AUTH_TOKEN")),
+        "phone_number": num,
+        "voice_url": f"{base}/api/twilio/voice",
+        "gather_url": f"{base}/api/twilio/gather",
+    }
+
+
+@app.post("/api/twilio/voice")
+async def twilio_voice_incoming(request: Request):
+    form = await request.form()
+    call_sid = form.get("CallSid", "")
+    sess = _workspace.create_session(channel="phone", caller_name="Phone caller")
+    sid = sess["session_id"]
+    if call_sid:
+        twilio_voice.bind_call(str(call_sid), sid)
+    xml = twilio_voice.twiml_gather(sid)
+    return Response(content=xml, media_type="application/xml")
+
+
+@app.post("/api/twilio/gather")
+async def twilio_gather(request: Request, session_id: str = ""):
+    form = await request.form()
+    speech = (form.get("SpeechResult") or "").strip()
+    call_sid = str(form.get("CallSid", ""))
+    sid = session_id or twilio_voice.session_for_call(call_sid) or ""
+    if not sid:
+        return Response(
+            content='<?xml version="1.0"?><Response><Say>Session error. Goodbye.</Say></Response>',
+            media_type="application/xml",
+        )
+    if not speech:
+        xml = twilio_voice.twiml_gather(sid, "I didn't catch that. Please repeat your request.")
+        return Response(content=xml, media_type="application/xml")
+    result = _workspace.send_message(sid, speech)
+    xml = twilio_voice.twiml_reply(sid, result.get("reply", ""), result.get("verdict", "ALLOW"))
+    return Response(content=xml, media_type="application/xml")
 
 
 if os.path.isdir(STATIC_DIR):

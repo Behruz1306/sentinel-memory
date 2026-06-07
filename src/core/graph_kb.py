@@ -220,6 +220,30 @@ class KnowledgeGraph:
         scored.sort(key=lambda t: t[1], reverse=True)
         return scored[:k]
 
+    def add_document(self, doc: Document) -> None:
+        self.docs[doc.id] = doc
+        self.nodes[doc.id] = Node(
+            doc.id, "document", doc.title,
+            {"permission": doc.required_permission, "sensitivity": doc.sensitivity},
+        )
+        self._embed_ready = False
+
+    def add_user(self, user_id: str, name: str, role_key: str) -> None:
+        role_id = f"role:{role_key}" if not role_key.startswith("role:") else role_key
+        if role_id not in self.nodes:
+            grants = {
+                "ceo": ["perm:financial", "perm:confidential", "perm:internal", "perm:public"],
+                "finance": ["perm:financial", "perm:confidential", "perm:internal", "perm:public"],
+                "ops": ["perm:confidential", "perm:internal", "perm:public"],
+                "clinical": ["perm:confidential", "perm:internal", "perm:public"],
+                "compliance": ["perm:financial", "perm:confidential", "perm:internal", "perm:public"],
+                "support": ["perm:internal", "perm:public"],
+                "guest": ["perm:public"],
+            }.get(role_key.replace("role:", ""), ["perm:public"])
+            self.nodes[role_id] = Node(role_id, "role", role_key.title(),
+                                       {"grants": grants})
+        self.nodes[user_id] = Node(user_id, "user", name, {"role": role_id})
+
     def stats(self) -> dict:
         return {
             "users": sum(1 for n in self.nodes.values() if n.kind == "user"),

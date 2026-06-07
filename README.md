@@ -16,7 +16,7 @@ Repository: https://github.com/Behruz1306/sentinel-memory. Demo runbook: see DEM
 
 To run the tests: `.venv/bin/python -m pytest -q`. They are offline and deterministic, so they pass with no API keys.
 
-One command demo, after the setup below: run `./run_demo.sh` and open http://localhost:8000. The Live Command Center tab streams four real time panels over WebSocket: live transcript with a trust score chart and voice biometrics, predictive Moss pre fetch events, a Moss threat memory matrix, and a self learning immune system counter with toast alerts. We have verified live: Moss semantic retrieval, a LiveKit voice agent registered as `sentinel`, in browser voice with a real time trust gated verdict stream, and a one hundred percent red team defense rate.
+One command demo, after the setup below: run `./run_demo.sh` and open http://localhost:8000. The main surface is **Sentinel Workspace** — one window where judges pick an industry pack (Logistics, Healthcare, Fintech), run full multi turn conversations, upload company JSON or PDF, watch trust decisions live, and see collective memory grow in SQLite. Twilio calls use the same pipeline. JSON and PDF session reports export from the UI. Legacy Command Center: `/legacy`. Live: https://sentinel-memory.onrender.com/
 
 ---
 
@@ -146,9 +146,12 @@ cp .env.example .env            # paste your LiveKit, Moss, and both LLM keys (M
 .venv/bin/python demo_call.py call-verified-ceo   # same ask, verified, expect ALLOW
 .venv/bin/python demo_call.py call-book-carrier   # an authorized action
 
-# Live dashboard.
+# Sentinel Workspace (main UI) + legacy Command Center at /legacy.
 .venv/bin/python -m uvicorn server:app --port 8000
 open http://localhost:8000
+
+# Workspace API: multi turn chat, industry packs, PDF ingest (needs UNSILOED_API_KEY),
+# Twilio voice webhooks (TWILIO_* + SENTINEL_PUBLIC_URL), SQLite persistence.
 
 # Real voice agent through LiveKit Inference (no OpenAI or Deepgram key needed).
 .venv/bin/python -m src.middleware.livekit_agent console   # talk through the terminal mic

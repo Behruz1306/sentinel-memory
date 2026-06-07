@@ -30,7 +30,7 @@ PERMISSION_FOR = {
 def _headers():
     key = os.getenv("UNSILOED_API_KEY")
     if not key:
-        raise SystemExit("Set UNSILOED_API_KEY in .env")
+        raise RuntimeError("Set UNSILOED_API_KEY in .env for PDF parsing")
     return {"X-API-Key": key}
 
 

@@ -82,7 +82,19 @@ class SentinelRetriever:
         return self.kb.retrieve(query, k)
 
     def execute(self, session, query: str, intent: str = "read",
-                *, raise_on_deny: bool = False, use_llm: bool = True) -> RetrievalResult:
+                *, raise_on_deny: bool = False, use_llm: bool = True,
+                kb=None) -> RetrievalResult:
+        prev_kb = self.kb
+        if kb is not None:
+            self.kb = kb
+        try:
+            return self._execute_inner(session, query, intent,
+                                       raise_on_deny=raise_on_deny, use_llm=use_llm)
+        finally:
+            self.kb = prev_kb
+
+    def _execute_inner(self, session, query: str, intent: str = "read",
+                       *, raise_on_deny: bool = False, use_llm: bool = True) -> RetrievalResult:
         trust = te.compute_trust_score(session, use_llm=use_llm)
         reasons = list(trust.factors)
 

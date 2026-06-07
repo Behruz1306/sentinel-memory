@@ -20,3 +20,7 @@ boto3>=1.34
 
 # Mint LiveKit join tokens for the Live Voice tab (lightweight, no agents).
 livekit-api>=1.1
+
+# Workspace: PDF ingest (Unsiloed) + PDF session reports.
+requests>=2.31
+fpdf2>=2.7
