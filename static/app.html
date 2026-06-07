@@ -146,10 +146,23 @@ tr:hover td{background:#f8fafc}
 .verdict-card.REDACT{border-color:var(--redact);background:#fffbeb}
 .verdict-card .vh{font-weight:700;font-size:.95rem;margin-bottom:4px}
 .verdict-card .vp{font-size:.82rem;color:var(--muted);line-height:1.5}
+.phone-hero{background:linear-gradient(135deg,#0c1222,#1e3a5f);color:#fff;border-radius:16px;padding:28px;margin-bottom:20px;text-align:center}
+.phone-hero .number{font-size:2rem;font-weight:700;font-family:var(--mono);letter-spacing:.04em;margin:12px 0}
+.phone-hero a{color:#7cb3ff;text-decoration:none}
+.phone-hero .sub{font-size:.88rem;color:#94a3b8;line-height:1.55;max-width:520px;margin:0 auto}
+.live-feed{display:flex;flex-direction:column;gap:12px}
+.live-call{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.live-call.active{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.live-call .turn{font-size:.82rem;padding:8px 10px;border-radius:8px;margin-bottom:6px;line-height:1.45}
+.live-call .turn.user{background:var(--accent-soft)}
+.live-call .turn.assistant{background:#f1f5f9}
+.live-call .turn .meta{font-size:.7rem;color:var(--muted);margin-top:4px}
+.tag.LISTENING,.tag.REVIEW{background:#e0e7ff;color:#3730a3}
+.script-step{font-size:.82rem;padding:10px 12px;background:#f8fafc;border-radius:8px;margin-bottom:8px;border-left:3px solid var(--accent)}
 .plain-factor{font-size:.78rem;color:var(--text);padding:6px 10px;background:#f1f5f9;border-radius:6px;margin-bottom:4px;line-height:1.45}
 .info-pill{display:inline-block;font-size:.68rem;padding:2px 7px;border-radius:4px;background:var(--accent-soft);color:var(--accent);margin-left:4px;cursor:help}
 .help-tip{font-size:.72rem;color:var(--muted);margin-top:6px;line-height:1.4}
-@media(max-width:900px){.sidebar{display:none}.eval-layout,.compare-grid,.playground-layout{grid-template-columns:1fr}}
+@media(max-width:900px){.sidebar{display:none}.eval-layout,.compare-grid,.playground-layout,#view-phone>div:nth-child(2){grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -193,6 +206,7 @@ tr:hover td{background:#f8fafc}
       <a data-view="knowledge">📁 Knowledge Base</a>
       <a data-view="audits">📋 My Audits</a>
       <a data-view="threats">🧬 Threat Lab</a>
+      <a data-view="phone">📞 Phone Test</a>
       <a href="/legacy" target="_blank">⚡ Command Center</a>
     </nav>
     <div class="user">
@@ -215,6 +229,7 @@ tr:hover td{background:#f8fafc}
         </div>
         <div class="quick-actions">
           <button onclick="startTour()">📖 Navigation guide</button>
+          <button onclick="showView('phone')">📞 Phone test</button>
           <button onclick="showView('playground')">🧪 Open Playground</button>
           <button onclick="goEvaluate()">▶ Run security evaluation</button>
           <button onclick="runScenario('real-bec-email')">Test CEO fraud</button>
@@ -361,6 +376,32 @@ tr:hover td{background:#f8fafc}
         <tbody id="auditTable"></tbody></table>
       </section>
 
+      <section id="view-phone" class="hidden">
+        <div class="phone-hero" id="phoneHero">
+          <div style="font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;opacity:.8">Live phone test — all accounts</div>
+          <div class="number" id="phoneNumber">Loading…</div>
+          <p class="sub" id="phoneInstructions">Call this number and have a natural conversation. Watch the live feed below as trust builds — the final Accept or Reject comes after several turns, not on the first sentence.</p>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+          <div class="card">
+            <div class="lbl">Suggested call flow</div>
+            <p class="help-tip" style="margin:10px 0">Speak naturally across multiple turns — like a real caller.</p>
+            <div id="phoneScript"></div>
+          </div>
+          <div class="card">
+            <div class="lbl">How it works on the phone</div>
+            <p class="help-tip" style="margin-top:10px;line-height:1.55">
+              <strong>Turns 1–2:</strong> The agent asks who you are and what you need — no instant rejection.<br>
+              <strong>Turn 3+:</strong> Trust score updates each turn; sensitive requests trigger deeper review.<br>
+              <strong>Final:</strong> <span class="tag ALLOW">Accepted</span> or <span class="tag BLOCK">Rejected</span> with a clear spoken decision.<br>
+              Everything is saved to <strong>My Audits</strong> automatically.
+            </p>
+          </div>
+        </div>
+        <h3 style="font-size:.85rem;color:var(--muted);margin-bottom:10px">LIVE CALL FEED <span id="phoneActiveBadge"></span></h3>
+        <div class="live-feed" id="phoneLiveFeed"><p class="help-tip">No active calls — dial the number above to start a test.</p></div>
+      </section>
+
       <section id="view-threats" class="hidden">
         <div class="lab-box">
           <h3 style="font-size:.95rem;margin-bottom:8px">Detect attack signatures</h3>
@@ -440,6 +481,8 @@ const VERDICT_PLAIN = {
   ALLOW: { title: 'Allowed', desc: 'The caller has enough trust. The agent may read or act on the matched documents.' },
   BLOCK: { title: 'Blocked', desc: 'Trust is too low for this request. Sensitive content stays hidden from the agent.' },
   REDACT: { title: 'Partially hidden', desc: 'The document was returned but personal details were masked first.' },
+  LISTENING: { title: 'Conversation continues', desc: 'The agent is still gathering context — no final decision yet.' },
+  REVIEW: { title: 'Under security review', desc: 'Trust is being evaluated. The caller may be asked clarifying questions.' },
 };
 const LABELS = {
   verification: { claimed_only:'Words only (not verified)', cryptographic:'SSO / signed token', callback_on_file:'Callback to number on file',
@@ -575,9 +618,10 @@ async function finishOnboarding() {
 const VIEW_TITLES = {
   dashboard:'Dashboard', playground:'Trust Playground', properties:'How It Works',
   evaluate:'Evaluate Request', compare:'Naive RAG vs Sentinel',
-  knowledge:'Knowledge Base', audits:'My Audits', threats:'Threat Lab',
+  knowledge:'Knowledge Base', audits:'My Audits', threats:'Threat Lab', phone:'Phone Test',
 };
-const ALL_VIEWS = ['dashboard','playground','properties','evaluate','compare','knowledge','audits','threats'];
+const ALL_VIEWS = ['dashboard','playground','properties','evaluate','compare','knowledge','audits','threats','phone'];
+let phonePollTimer = null;
 
 function showView(name) {
   document.querySelectorAll('.nav a[data-view]').forEach(a => {
@@ -595,6 +639,8 @@ function showView(name) {
   if (name === 'knowledge') loadKnowledge();
   if (name === 'audits') loadAudits();
   if (name === 'threats') loadThreats();
+  if (name === 'phone') loadPhoneView();
+  if (name !== 'phone' && phonePollTimer) { clearInterval(phonePollTimer); phonePollTimer = null; }
 }
 
 function humanizeFactor(text) {
@@ -837,9 +883,9 @@ async function previewDoc(id, cid) {
 
 async function loadAudits() {
   const a = await api('/api/workspace/sessions?mine=1&limit=50');
-  document.getElementById('auditTable').innerHTML = (a.sessions||[]).map(s =>
+    document.getElementById('auditTable').innerHTML = (a.sessions||[]).map(s =>
     `<tr><td><code>${s.id}</code></td><td>${s.company_id}</td><td>${s.trust_score}</td>
-    <td>${s.channel}</td>
+    <td>${s.channel==='phone'?'📞 Phone':s.channel}</td>
     <td><a href="/api/workspace/sessions/${s.id}/report.pdf" target="_blank">PDF</a> ·
     <a href="/api/workspace/sessions/${s.id}/report" target="_blank">JSON</a></td></tr>`
   ).join('') || '<tr><td colspan="5">No audits yet.</td></tr>';
@@ -1003,6 +1049,65 @@ async function runThreatLearn() {
     ? `✓ Learned signature <code>${r.signature_id||'new'}</code> — immune system updated.`
     : `⚠ ${r.reason||r.error||'Learn failed'}`;
   loadThreats();
+}
+
+function renderPhoneTimeline(timeline) {
+  return (timeline||[]).map(t => {
+    const vp = VERDICT_PLAIN[t.verdict] || (t.verdict ? { title: t.verdict } : null);
+    const final = t.phone_final ? ' <span class="tag ALLOW">Final</span>' : '';
+    return `<div class="turn ${t.role}"><strong>${t.role==='user'?'Caller':'Agent'}:</strong> ${(t.content||'').replace(/</g,'&lt;')}
+      <div class="meta">${t.trust_score!=null?`Trust ${t.trust_score}/100`:''}${vp?` · ${vp.title}`:''}${final}</div></div>`;
+  }).join('');
+}
+
+async function loadPhoneView() {
+  const st = await api('/api/twilio/status');
+  const num = st.phone_number;
+  const el = document.getElementById('phoneNumber');
+  if (num) {
+    el.innerHTML = `<a href="tel:${num.replace(/\s/g,'')}">${st.phone_display||num}</a>`;
+    document.getElementById('phoneInstructions').textContent = st.instructions || document.getElementById('phoneInstructions').textContent;
+    document.getElementById('phoneScript').innerHTML = (st.demo_script||[]).map((s,i) =>
+      `<div class="script-step"><strong>Turn ${i+1}:</strong> "${s}"</div>`
+    ).join('');
+  } else {
+    el.textContent = 'Twilio not configured';
+    document.getElementById('phoneInstructions').textContent =
+      'Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, and SENTINEL_PUBLIC_URL on the server.';
+  }
+  await refreshPhoneFeed();
+  if (phonePollTimer) clearInterval(phonePollTimer);
+  phonePollTimer = setInterval(refreshPhoneFeed, 2500);
+}
+
+async function refreshPhoneFeed() {
+  try {
+    const feed = await api('/api/twilio/live-feed');
+    document.getElementById('phoneActiveBadge').textContent = feed.active_count
+      ? `(${feed.active_count} active)` : '';
+    const box = document.getElementById('phoneLiveFeed');
+    if (!feed.sessions?.length) {
+      box.innerHTML = '<p class="help-tip">No calls yet — dial the number and speak naturally. This panel updates live.</p>';
+      return;
+    }
+    box.innerHTML = feed.sessions.map(s => {
+      const pv = VERDICT_PLAIN[s.phone_verdict] || VERDICT_PLAIN[s.real_verdict] || { title: s.phone_verdict||'—' };
+      const status = s.phone_final
+        ? (s.real_verdict==='ALLOW'?'<span class="tag ALLOW">Accepted</span>':'<span class="tag BLOCK">Rejected</span>')
+        : '<span class="tag LISTENING">In progress</span>';
+      return `<div class="live-call ${s.active?'active':''}">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+          <strong>${s.caller_name}</strong> ${status}
+          <span class="help-tip">${s.turn_count} turns · Trust ${s.trust_score}/100 · ${fmtTime(s.updated_at)}</span>
+        </div>
+        <p class="help-tip" style="margin-bottom:8px">${pv.title}${s.phone_final?' — final decision delivered on the call.':''}</p>
+        ${renderPhoneTimeline(s.timeline)}
+        <a href="#" onclick="showView('audits');return false" style="font-size:.78rem;color:var(--accent)">View in My Audits →</a>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('phoneLiveFeed').innerHTML = '<p class="help-tip">'+e.message+'</p>';
+  }
 }
 
 async function loadThreats() {

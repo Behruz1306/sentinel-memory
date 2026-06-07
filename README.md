@@ -38,6 +38,8 @@ My Audits — saved evaluation history with PDF and JSON exports.
 
 Threat Lab — detect attack phrases and teach new signatures to the immune system.
 
+Phone Test — call the shared Twilio number from any account. Speak naturally over several turns; the agent asks clarifying questions before a final Accept or Reject. Watch the live call feed in the app; every call is saved to My Audits.
+
 Industry packs included: Acme Logistics (3PL), Meridian Health (Healthcare), NovaPay (Fintech).
 
 Legacy Command Center for live telemetry: `/legacy`.
@@ -114,7 +116,7 @@ Supabase (optional) persists users, sessions, and audits across Render redeploys
 
 AWS CloudWatch logs breaches when credentials are available; otherwise `security_events.jsonl`.
 
-Twilio voice webhooks for phone integration (`TWILIO_*` + `SENTINEL_PUBLIC_URL`).
+Twilio voice webhooks for phone integration (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `SENTINEL_PUBLIC_URL`). The same test number is shown to every logged-in user under Phone Test.
 
 FastAPI + `static/app.html` — the main product UI with login, playground, guides, and audits.
 

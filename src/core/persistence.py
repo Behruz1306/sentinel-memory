@@ -68,8 +68,8 @@ def log_activity(kind: str, summary: str, *, session_id: str = "", detail=None):
     return _store().log_activity(kind, summary, session_id=session_id, detail=detail)
 
 
-def list_sessions(limit: int = 30, user_id: str = ""):
-    return _store().list_sessions(limit, user_id)
+def list_sessions(limit: int = 30, user_id: str = "", channel: str = ""):
+    return _store().list_sessions(limit, user_id, channel)
 
 
 def user_dashboard(user_id: str):

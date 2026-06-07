@@ -116,10 +116,12 @@ def log_activity(kind: str, summary: str, *, session_id: str = "",
     }).execute()
 
 
-def list_sessions(limit: int = 30, user_id: str = "") -> list:
+def list_sessions(limit: int = 30, user_id: str = "", channel: str = "") -> list:
     q = _sb().table("sessions").select("*").order("updated_at", desc=True).limit(limit)
     if user_id:
         q = q.eq("user_id", user_id)
+    if channel:
+        q = q.eq("channel", channel)
     return [_row_session(r) for r in q.execute().data or []]
 
 

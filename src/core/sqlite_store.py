@@ -257,17 +257,19 @@ def log_activity(kind: str, summary: str, *, session_id: str = "",
         _connect().commit()
 
 
-def list_sessions(limit: int = 30, user_id: str = "") -> list:
+def list_sessions(limit: int = 30, user_id: str = "", channel: str = "") -> list:
     with _lock:
+        q = "SELECT * FROM sessions WHERE 1=1"
+        params: list = []
         if user_id:
-            rows = _connect().execute(
-                "SELECT * FROM sessions WHERE user_id=? ORDER BY updated_at DESC LIMIT ?",
-                (user_id, limit),
-            ).fetchall()
-        else:
-            rows = _connect().execute(
-                "SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ?", (limit,)
-            ).fetchall()
+            q += " AND user_id=?"
+            params.append(user_id)
+        if channel:
+            q += " AND channel=?"
+            params.append(channel)
+        q += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(limit)
+        rows = _connect().execute(q, params).fetchall()
     return [_row_session(r) for r in rows]
 
 

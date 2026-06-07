@@ -56,6 +56,94 @@ def _infer_identity(message: str, company_id: str) -> dict:
     return out
 
 
+_SENSITIVE_RE = re.compile(
+    r"\b(payroll|salary|bank|routing|wire|ssn|social security|patient record|"
+    r"chart|diagnosis|financial|confidential|password|account number)\b", re.I,
+)
+
+
+def _sensitive_request(message: str) -> bool:
+    return bool(_SENSITIVE_RE.search(message or ""))
+
+
+def _user_turn_count(rec: dict) -> int:
+    return sum(1 for t in (rec.get("turns") or []) if t.get("role") == "user")
+
+
+def _phone_dialogue(verdict: str, turn_num: int, trust: dict, analysis: dict,
+                    message: str) -> tuple[str, str, bool]:
+    """Natural phone conversation — defer hard reject/accept until enough dialogue."""
+    trust_score = int(trust.get("score") or 0)
+    ctx = {
+        "docs": analysis.get("docs"),
+        "action": analysis.get("action"),
+        "trust_score": trust_score,
+        "threat_match": analysis.get("threat_match"),
+    }
+    sensitive = _sensitive_request(message)
+    threat = bool(analysis.get("threat_match"))
+
+    final = (
+        turn_num >= 4
+        or (turn_num >= 3 and sensitive and verdict in ("BLOCK", "ALLOW", "REDACT"))
+        or (turn_num >= 3 and verdict == "BLOCK" and trust_score < 30)
+        or (turn_num >= 2 and verdict == "BLOCK" and threat and trust_score < 40)
+        or (verdict == "ALLOW" and trust_score >= 75 and sensitive)
+    )
+
+    if not final:
+        if turn_num <= 1:
+            return (
+                "Thank you for calling. I'd be happy to help. "
+                "Could you tell me your full name and which department you're calling from?",
+                "LISTENING", False,
+            )
+        if turn_num == 2:
+            return (
+                "I appreciate that. I can help with shipments, vendor accounts, "
+                "and internal documents. What would you like to look up today? "
+                "If this involves payroll or financial records, I may need extra verification.",
+                "LISTENING", False,
+            )
+        if verdict == "BLOCK":
+            return (
+                "I understand. Before I can share anything sensitive, "
+                "I need to build a clearer picture of your request and verify your identity. "
+                "Can you explain why this is urgent, and whether you can use our standard approval process?",
+                "REVIEW", False,
+            )
+        if verdict == "REDACT":
+            return (
+                "I may be able to share a summary with some details withheld. "
+                "Could you be more specific about exactly what you need?",
+                "REVIEW", False,
+            )
+        return (
+            _agent_reply(verdict, ctx, message) + " What else can I help you with?",
+            "LISTENING", False,
+        )
+
+    if verdict == "BLOCK":
+        return (
+            "I've now completed my full security review. "
+            "Unfortunately I cannot approve access to the sensitive information you requested — "
+            f"your session trust score is {trust_score} out of 100, which is below our threshold. "
+            "Please contact IT security or use the verified channel on file.",
+            "BLOCK", True,
+        )
+    if verdict == "REDACT":
+        base = _agent_reply(verdict, ctx, message)
+        return (
+            f"After review, I can share a limited version. {base}",
+            "REDACT", True,
+        )
+    base = _agent_reply(verdict, ctx, message)
+    return (
+        f"Good news — after our conversation I've verified enough trust to proceed. {base}",
+        "ALLOW", True,
+    )
+
+
 def _agent_reply(verdict: str, analysis: dict, message: str) -> str:
     action = (analysis.get("action") or {})
     if verdict == "BLOCK":
@@ -145,6 +233,8 @@ class Workspace:
 
         state.commit_final(message)
         store.add_turn(session_id, role="user", content=message)
+        turn_num = _user_turn_count(store.get_session(session_id) or rec)
+        is_phone = rec.get("channel") == "phone"
 
         use_llm = not _cloud_deploy()
         result = self.retriever.execute(
@@ -176,30 +266,70 @@ class Workspace:
                 detail={"signature_id": learned.get("signature_id"), "text_preview": message[:80]},
             )
 
-        reply = _agent_reply(verdict, {
-            "docs": analysis.get("docs"),
-            "action": analysis.get("action"),
-            "trust_score": trust.get("score"),
-            "threat_match": threat_match,
-        }, message)
+        phone_final = False
+        phone_verdict = verdict
+        if is_phone:
+            reply, phone_verdict, phone_final = _phone_dialogue(
+                verdict, turn_num, trust, {
+                    "docs": analysis.get("docs"),
+                    "action": analysis.get("action"),
+                    "threat_match": threat_match,
+                }, message,
+            )
+        else:
+            reply = _agent_reply(verdict, {
+                "docs": analysis.get("docs"),
+                "action": analysis.get("action"),
+                "trust_score": trust.get("score"),
+                "threat_match": threat_match,
+            }, message)
 
         turn_analysis = {
             "verdict": verdict, "trust": trust, "docs": analysis.get("docs"),
             "action": analysis.get("action"), "predictive": analysis.get("predictive"),
             "reasons": analysis.get("reasons"), "threat_match": threat_match,
             "naive_leak": _naive_preview(message, kb),
+            "phone_verdict": phone_verdict if is_phone else None,
+            "phone_final": phone_final if is_phone else None,
+            "phone_turn": turn_num if is_phone else None,
         }
         store.add_turn(
             session_id, role="assistant", content=reply,
-            verdict=verdict, trust_score=trust.get("score", 0),
+            verdict=verdict if (not is_phone or phone_final) else phone_verdict,
+            trust_score=trust.get("score", 0),
             analysis=turn_analysis,
         )
+        act_kind = f"verdict_{verdict.lower()}"
+        act_summary = f"{verdict} — trust {trust.get('score')} — {message[:60]}…"
+        if is_phone and not phone_final:
+            act_kind = "phone_dialogue"
+            act_summary = f"Phone turn {turn_num} ({phone_verdict}) — trust {trust.get('score')} — {message[:50]}…"
         store.log_activity(
-            f"verdict_{verdict.lower()}",
-            f"{verdict} — trust {trust.get('score')} — {message[:60]}…",
+            act_kind, act_summary,
             session_id=session_id,
-            detail={"verdict": verdict, "trust": trust.get("score"), "threat": threat_match},
+            detail={
+                "verdict": verdict, "phone_verdict": phone_verdict,
+                "phone_final": phone_final, "trust": trust.get("score"),
+                "threat": threat_match,
+            },
         )
+
+        try:
+            from .dashboard_bus import push_dashboard_update
+            push_dashboard_update({
+                "session_id": session_id,
+                "transcript": state.full_context(),
+                "query": message,
+                "trust_score": trust.get("score"),
+                "se_risk": trust.get("se_risk"),
+                "verdict": phone_verdict if is_phone else verdict,
+                "decision": verdict,
+                "threat_match": threat_match or None,
+                "channel": rec.get("channel"),
+                "phone_final": phone_final,
+            })
+        except Exception:
+            pass
 
         return {
             "session_id": session_id,
@@ -207,6 +337,9 @@ class Workspace:
             "reply": reply,
             "verdict": verdict,
             "trust_score": trust.get("score"),
+            "phone_verdict": phone_verdict if is_phone else None,
+            "phone_final": phone_final if is_phone else None,
+            "phone_turn": turn_num if is_phone else None,
             "analysis": turn_analysis,
             "transcript": state.full_context(),
             "timeline": _build_timeline(store.get_session(session_id) or rec),
