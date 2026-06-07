@@ -10,6 +10,10 @@ services:
     region: oregon
     healthCheckPath: /api/health
     envVars:
+      - key: RENDER
+        value: "true"
+      - key: SENTINEL_CLOUD_DEPLOY
+        value: "1"
       - key: SENTINEL_LLM_PROVIDERS
         value: minimax,qwen
       - key: AWS_REGION

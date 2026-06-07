@@ -484,7 +484,10 @@ def workspace_get_session(session_id: str):
 
 @app.post("/api/workspace/sessions/{session_id}/message")
 def workspace_message(session_id: str, body: WorkspaceMessageBody):
-    return _workspace.send_message(session_id, body.message, persona=body.persona)
+    try:
+        return _workspace.send_message(session_id, body.message, persona=body.persona)
+    except Exception as e:
+        return {"error": str(e)[:500], "session_id": session_id}
 
 
 @app.get("/api/workspace/sessions/{session_id}/report")

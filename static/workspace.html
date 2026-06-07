@@ -439,11 +439,30 @@ let company = null;
 let packId = 'acme-logistics';
 let sending = false;
 
+async function wakeServer(tries = 6) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const r = await fetch('/api/health', { cache: 'no-store' });
+      if (r.ok) return true;
+    } catch (e) {}
+    await new Promise(r => setTimeout(r, 3500));
+  }
+  return false;
+}
+
 async function fetchJSON(url, opts) {
   const r = await fetch(url, opts);
   const t = await r.text();
-  if (!r.ok) throw new Error(t || r.statusText);
-  try { return JSON.parse(t); } catch { throw new Error(t.slice(0, 200)); }
+  if (!r.ok) {
+    const isHtml = t.trim().startsWith('<!') || t.includes('<html');
+    if (r.status === 502 || r.status === 503 || isHtml) {
+      throw new Error('Server waking up (Render free tier) — wait 30 seconds and press Send again.');
+    }
+    throw new Error(t.slice(0, 200) || `HTTP ${r.status}`);
+  }
+  try { return JSON.parse(t); } catch {
+    throw new Error('Invalid server response — try again in a few seconds.');
+  }
 }
 
 function setTrust(score) {
@@ -589,17 +608,19 @@ async function sendMessage() {
   if (personaKey && PERSONAS[personaKey]) body.persona = PERSONAS[personaKey];
 
   try {
+    await wakeServer(4);
     const data = await fetchJSON(`/api/workspace/sessions/${sessionId}/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    if (data.error) throw new Error(data.error);
     addMessage('assistant', data.reply, data.analysis);
     renderAnalysis(data);
     refreshFeed();
     refreshStats();
   } catch (e) {
-    addMessage('assistant', 'Error: ' + e.message);
+    addMessage('assistant', '⚠ ' + (e.message || 'Request failed — retry in 30s.'));
   }
   sending = false;
   document.getElementById('btnSend').disabled = false;
@@ -689,7 +710,7 @@ document.getElementById('uploadPdf').onchange = async e => {
   ws.onclose = () => { document.getElementById('connBadge').textContent = '○ reconnecting'; setTimeout(ws, 3000); };
 })();
 
-loadCompany(packId).then(() => newSession()).then(refreshStats).then(refreshFeed);
+wakeServer(6).then(() => loadCompany(packId)).then(() => newSession()).then(refreshStats).then(refreshFeed);
 </script>
 </body>
 </html>
