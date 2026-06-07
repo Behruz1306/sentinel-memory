@@ -25,8 +25,12 @@ full voice demo.
 Pick a region, for example `us-east-1`.
 
 In IAM, create a user (for example `github-sentinel-deploy`) and attach a policy.
-You can paste the minimal policy from `deploy/github-actions-iam-policy.json`,
-or attach the managed policy `AmazonEC2ContainerRegistryPowerUser`.
+Either attach `AmazonEC2ContainerRegistryFullAccess`, or use
+`AmazonEC2ContainerRegistryPowerUser` **and** create the ECR repository manually
+first (PowerUser can push images but cannot create new repositories).
+
+Quick manual repo (Console → search **ECR** → **Create repository** → name
+`sentinel`, keep the same region as `AWS_REGION` in GitHub, default `us-east-1`).
 
 Create an access key for that user. You will put it in GitHub, not in the repo.
 
