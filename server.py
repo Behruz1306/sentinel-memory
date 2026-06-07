@@ -36,6 +36,7 @@ from src.core.session import SessionState
 from src.core.threat_memory import threat_memory
 from src.core import auth as auth_mod
 from src.core.company_kb import list_documents, get_document, registry as kb_registry
+from src.core import trust_engine as te
 from src.core.workspace import Workspace, ingest_pdf, upload_company
 from src.middleware import twilio_voice
 from src.middleware.stream_simulator import CALLS, get_call, play
@@ -520,6 +521,107 @@ def knowledge_doc(doc_id: str, company_id: str = "acme-logistics"):
     if not doc:
         return {"error": "not found"}
     return doc
+
+
+@app.get("/api/guide")
+def product_guide():
+    """Human-readable catalog of Sentinel capabilities for the UI."""
+    return {
+        "properties": [
+            {"id": "trust", "title": "Session Trust Score",
+             "summary": "0–100 score from identity, origin, deepfake signals, and social-engineering risk — not text similarity.",
+             "try": "playground"},
+            {"id": "matrix", "title": "Permission Matrix",
+             "summary": "PUBLIC>10, INTERNAL>50, CONFIDENTIAL>70, FINANCIAL>90. Documents gate individually.",
+             "try": "properties"},
+            {"id": "threat", "title": "Moss Threat Memory",
+             "summary": "Semantic IDS: utterances matched against attack signatures; immune system learns new ones.",
+             "try": "threats"},
+            {"id": "naive", "title": "Naive RAG vs Sentinel",
+             "summary": "Vanilla RAG leaks by similarity; Sentinel blocks unverified callers from sensitive docs.",
+             "try": "compare"},
+            {"id": "prefetch", "title": "Predictive Pre-fetch",
+             "summary": "Warms the cache on entity mentions before the caller finishes speaking.",
+             "try": "legacy"},
+            {"id": "ensemble", "title": "Dual-LLM Ensemble",
+             "summary": "MiniMax + Qwen analysts run concurrently; firewall takes max risk (defense in depth).",
+             "try": "playground"},
+        ],
+        "permission_matrix": te.PERMISSION_MATRIX,
+        "origin_baseline": te.ORIGIN_BASELINE,
+        "verification_factor": te.VERIFICATION_FACTOR,
+        "role_trust": te.ROLE_BASE_TRUST,
+        "llm": llm.llm_info(),
+        "threat_memory": threat_memory.stats(),
+    }
+
+
+class PlaygroundBody(BaseModel):
+    query: str
+    company_id: str = "acme-logistics"
+    claimed_identity: str = "guest"
+    verification: str = "claimed_only"
+    origin: str = "unknown"
+    voice_anomaly: float = 0.0
+    verified_user_id: Optional[str] = None
+    save_session: bool = True
+
+
+@app.post("/api/playground/run")
+def playground_run(body: PlaygroundBody, request: Request):
+    """One-shot full pipeline: trust gate + naive compare + threat detect (+ optional persist)."""
+    user = _user_from_request(request)
+    kb = kb_registry.get(body.company_id)
+    s = SessionState(
+        session_id="playground", caller_id="playground",
+        claimed_identity=body.claimed_identity,
+        verification=body.verification, origin=body.origin,
+        voice_anomaly=body.voice_anomaly,
+        verified_user_id=body.verified_user_id,
+    )
+    cloud = _cloud_deploy()
+    sentinel = _retriever.execute(
+        s, body.query, intent="action", raise_on_deny=False,
+        use_llm=not cloud, kb=kb,
+    )
+    naive_hits = kb.retrieve(body.query, 4) or []
+    naive = [
+        {"title": doc.title, "sensitivity": doc.sensitivity,
+         "leaked": doc.sensitivity in ("CONFIDENTIAL", "RESTRICTED", "FINANCIAL"),
+         "served": (doc.content or "")[:400]}
+        for doc, _ in naive_hits
+    ]
+    threat = threat_memory.detect(body.query).to_dict()
+    session_id = None
+    if body.save_session and user:
+        session_id = db.create_session(
+            company_id=body.company_id, channel="playground", user_id=user["id"],
+            claimed_identity=body.claimed_identity, verification=body.verification,
+            origin=body.origin, voice_anomaly=body.voice_anomaly,
+        )
+        analysis = sentinel.to_dict()
+        trust = analysis.get("trust") or {}
+        db.add_turn(session_id, role="user", content=body.query)
+        db.add_turn(
+            session_id, role="assistant",
+            content=f"Verdict {sentinel.decision} — trust {trust.get('score', 0)}",
+            verdict=sentinel.decision, trust_score=trust.get("score", 0),
+            analysis={**analysis, "threat_detect": threat, "naive_leak": naive},
+        )
+    leaked = sum(1 for n in naive if n["leaked"])
+    return {
+        "verdict": sentinel.decision,
+        "trust": sentinel.trust,
+        "sentinel": sentinel.to_dict(),
+        "naive": naive,
+        "naive_leaked_count": leaked,
+        "threat": threat,
+        "summary": (
+            f"Trust {sentinel.trust.get('score', 0)} → {sentinel.decision}. "
+            f"Naive RAG would leak {leaked} sensitive hit(s)."
+        ),
+        "session_id": session_id,
+    }
 
 
 # --- Sentinel Workspace (persistent multi-turn evaluation) -----------------
