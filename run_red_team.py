@@ -16,8 +16,12 @@ try:
 except Exception:
     pass
 
-from src.red_team.simulator import run_campaign, print_report
+import sys
+
+from src.red_team.simulator import demonstrate_learning, print_report, run_campaign
 
 
 if __name__ == "__main__":
     print_report(run_campaign())
+    if "--no-learn" not in sys.argv:
+        demonstrate_learning()

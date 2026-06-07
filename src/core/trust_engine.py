@@ -20,6 +20,7 @@ from . import llm
 from .exceptions import AccessDeniedException
 from .cloudwatch import security_log
 from .session import SessionState
+from .threat_memory import threat_memory
 
 # --- Hierarchical data permission matrix ------------------------------------
 # A document of sensitivity S is retrievable only if SessionTrustScore > T.
@@ -124,16 +125,45 @@ def _heuristic_threat(transcript: str) -> dict:
             "engine": "heuristic"}
 
 
+def _semantic_layer(transcript: str, base: dict) -> dict:
+    """Fuse Moss-backed semantic threat detection into a threat dict.
+
+    This is the unusual-Moss step: the utterance is nearest-neighbour matched
+    against the attack-memory index. It runs even when use_llm=False (the live
+    voice path) because a Moss lookup is milliseconds, not seconds — giving the
+    real-time path semantic threat analysis it never had.
+    """
+    match = threat_memory.detect(transcript)
+    out = dict(base)
+    out["semantic"] = match.to_dict()
+    if match.matched:
+        # The semantic match raises the risk floor and contributes a signal /
+        # attack label even when regex saw nothing (paraphrased attacks).
+        out["risk"] = max(int(base.get("risk", 0)), match.risk)
+        sig = f"semantic:{match.tactic or match.attack_type}"
+        tactics = list(base.get("tactics") or [])
+        if sig not in tactics:
+            tactics.append(sig)
+        out["tactics"] = tactics
+        if base.get("attack_type", "none") in ("none", ""):
+            out["attack_type"] = match.attack_type
+        out["recommendation"] = "BLOCK" if out["risk"] >= 60 else \
+            "VERIFY" if out["risk"] >= 30 else out.get("recommendation", "ALLOW")
+    return out
+
+
 def analyze_threat(transcript: str, *, claimed_identity: str = "unknown",
                    requested: str = "", use_llm: bool = True) -> dict:
-    """Real LLM threat analysis (MiniMax-M3); deterministic fallback if down.
+    """Layered threat analysis: regex heuristic + Moss semantic memory + LLM.
 
-    `use_llm=False` forces the fast heuristic — used on the real-time voice path
-    where a multi-second LLM call would stall the conversation.
+    `use_llm=False` forces the fast path (heuristic + semantic) — used on the
+    real-time voice path where a multi-second LLM call would stall the
+    conversation. The Moss semantic layer still runs there (it's milliseconds).
     """
     heur = _heuristic_threat(transcript)
+    fast = _semantic_layer(transcript, heur)
     if not use_llm:
-        return heur
+        return fast
     out = llm.complete_json(
         system=_THREAT_SYSTEM,
         user=(f"Caller claims to be: {claimed_identity}\n"
@@ -142,21 +172,29 @@ def analyze_threat(transcript: str, *, claimed_identity: str = "unknown",
         max_tokens=420,
     )
     if not out:
-        return heur
+        return fast
     try:
-        risk = max(0, min(100, int(out.get("risk", heur["risk"]))))
-        tactics = [str(x) for x in (out.get("tactics") or [])] or heur["tactics"]
+        risk = max(0, min(100, int(out.get("risk", fast["risk"]))))
+        tactics = [str(x) for x in (out.get("tactics") or [])] or fast["tactics"]
+        for sig in fast.get("tactics", []):           # keep semantic signals
+            if sig.startswith("semantic:") and sig not in tactics:
+                tactics.append(sig)
+        # Never let the LLM talk us below what regex or the Moss memory already
+        # proved — a confirmed semantic attack match is a hard floor.
+        floor = max(fast["risk"] if fast["tactics"] else 0,
+                    fast["semantic"]["risk"] if fast["semantic"]["matched"] else 0)
         return {
-            "risk": max(risk, heur["risk"] if heur["tactics"] else 0),
-            "attack_type": str(out.get("attack_type", heur["attack_type"])),
+            "risk": max(risk, floor),
+            "attack_type": str(out.get("attack_type", fast["attack_type"])),
             "tactics": tactics,
             "confidence": int(out.get("confidence", 80)),
-            "recommendation": str(out.get("recommendation", heur["recommendation"])).upper(),
+            "recommendation": str(out.get("recommendation", fast["recommendation"])).upper(),
             "reasoning": str(out.get("reasoning", "")),
             "engine": llm.llm_info().get("model", "llm"),
+            "semantic": fast["semantic"],
         }
     except Exception:
-        return heur
+        return fast
 
 
 # Back-compat shim used elsewhere/tests.
@@ -195,6 +233,13 @@ def compute_trust_score(session: SessionState, *, use_llm: bool = True) -> Trust
         factors.append(
             f"Voice-liveness signal {session.voice_anomaly:.2f} (synthetic likelihood) "
             f"→ −{deepfake_penalty} trust."
+        )
+    sem = threat.get("semantic", {})
+    if sem.get("matched"):
+        factors.append(
+            f"🧬 Moss threat-memory matched a known '{sem.get('attack_type')}' attack "
+            f"(nearest signature {sem.get('signature_id')} @ {sem.get('score')} "
+            f"{sem.get('backend')} similarity) → semantic detection."
         )
     if se_risk >= 40:
         eng = threat.get("engine", "analysis")

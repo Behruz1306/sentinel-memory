@@ -28,6 +28,7 @@ from src.core.cloudwatch import security_log
 from src.core.graph_kb import KnowledgeGraph
 from src.core.retrieval import SentinelRetriever
 from src.core.session import SessionState
+from src.core.threat_memory import threat_memory
 from src.middleware.stream_simulator import CALLS, get_call, play
 from src.middleware.pipeline import SentinelPipeline
 from src.red_team.simulator import run_campaign
@@ -66,6 +67,7 @@ def health():
         "retrieval": _retriever.backend,
         "breach_sink": security_log.sink,
         "kb": _kb.stats(),
+        "threat_memory": threat_memory.stats(),
     }
 
 
@@ -146,6 +148,45 @@ def redteam():
             for r in camp["results"]
         ],
     }
+
+
+class ThreatBody(BaseModel):
+    text: str
+
+
+class LearnBody(BaseModel):
+    text: str
+    attack_type: str = "social engineering"
+    tactic: str = "learned"
+    severity: int = 80
+
+
+@app.get("/api/threat/memory")
+def threat_memory_stats():
+    """The immune system's current state — how many attacks Moss remembers."""
+    return {
+        **threat_memory.stats(),
+        "signatures": [
+            {"id": s.id, "attack_type": s.attack_type, "tactic": s.tactic,
+             "severity": s.severity, "text": s.text}
+            for s in threat_memory.signatures()
+        ],
+    }
+
+
+@app.post("/api/threat/detect")
+def threat_detect(body: ThreatBody):
+    """Semantically match arbitrary text against the Moss attack memory."""
+    return threat_memory.detect(body.text).to_dict()
+
+
+@app.post("/api/threat/learn")
+def threat_learn(body: LearnBody):
+    """Teach the firewall a new attack at runtime (writes back into Moss)."""
+    return threat_memory.learn(
+        body.text, attack_type=body.attack_type, tactic=body.tactic,
+        severity=body.severity,
+    )
 
 
 # Persona presets stamp the trust metadata the agent reads from dispatch.

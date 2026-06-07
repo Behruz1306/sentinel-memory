@@ -42,12 +42,13 @@ _client = None
 _resolved = False
 _info: dict = {"provider": None, "model": None, "ready": False}
 
-# Circuit breaker: after repeated failures (bad key, no balance, unsupported
-# param) we stop calling the API and fall back to deterministic heuristics, so
-# a dead provider never slows the live demo.
-_fail_count = 0
-_FAIL_LIMIT = 2
+# Circuit breaker: only a *credentials* failure (bad key / no balance) disables
+# the client. Transient errors (timeout, rate-limit, 5xx) just fall back for
+# that one call and retry next time — so a burst of red-team calls never
+# permanently darkens the LLM.
 _disabled = False
+_AUTH_MARKERS = ("insufficient balance", "invalid api key", "incorrect api key",
+                 "401", "402", "403", "authentication", "unauthorized")
 
 
 def _resolve():
@@ -69,7 +70,7 @@ def _resolve():
     try:
         from openai import OpenAI  # optional dependency
 
-        kwargs = {"api_key": api_key}
+        kwargs = {"api_key": api_key, "timeout": 25.0, "max_retries": 2}
         if base_url:
             kwargs["base_url"] = base_url
         _client = OpenAI(**kwargs)
@@ -108,7 +109,7 @@ def complete_json(system: str, user: str, *, max_tokens: int = 400) -> Optional[
     parameter, retries without it and extracts JSON from the text. This keeps
     us safe against provider-specific unsupported params.
     """
-    global _fail_count, _disabled
+    global _disabled
     _resolve()
     if _client is None or _disabled:
         return None
@@ -118,10 +119,11 @@ def complete_json(system: str, user: str, *, max_tokens: int = 400) -> Optional[
         {"role": "user", "content": user},
     ]
 
-    def _trip():
-        global _fail_count, _disabled
-        _fail_count += 1
-        if _fail_count >= _FAIL_LIMIT:
+    def _maybe_disable(exc):
+        # Only a credentials/balance error kills the client; transient errors
+        # (timeout, rate-limit, 5xx) just fall back for this one call.
+        global _disabled
+        if any(m in str(exc).lower() for m in _AUTH_MARKERS):
             _disabled = True
             _info["ready"] = False
 
@@ -132,14 +134,16 @@ def complete_json(system: str, user: str, *, max_tokens: int = 400) -> Optional[
             response_format={"type": "json_object"}, messages=messages,
         )
         return _extract_json(resp.choices[0].message.content or "")
-    except Exception:
-        pass
+    except Exception as e:
+        _maybe_disable(e)
+        if _disabled:
+            return None
     # Attempt 2: plain completion (provider may reject response_format).
     try:
         resp = _client.chat.completions.create(
             model=model, temperature=0, max_tokens=max_tokens, messages=messages,
         )
         return _extract_json(resp.choices[0].message.content or "")
-    except Exception:
-        _trip()
+    except Exception as e:
+        _maybe_disable(e)
         return None
