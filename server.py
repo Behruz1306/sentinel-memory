@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import uuid
 from typing import Optional
 
 try:
@@ -118,6 +120,52 @@ def redteam():
             for r in camp["results"]
         ],
     }
+
+
+# Persona presets stamp the trust metadata the agent reads from dispatch.
+VOICE_PERSONAS = {
+    "deepfake_ceo": {"label": "Deepfake “CEO” (spoofed)", "claimed_identity": "ceo",
+                     "verification": "claimed_only", "origin": "spoofed", "voice_anomaly": 0.85},
+    "verified_ceo": {"label": "Verified CEO (SSO)", "claimed_identity": "ceo",
+                     "verification": "cryptographic", "origin": "corporate_sso",
+                     "voice_anomaly": 0.03, "verified_user_id": "user:mark"},
+    "guest": {"label": "Unknown caller", "claimed_identity": "guest",
+              "verification": "claimed_only", "origin": "unknown", "voice_anomaly": 0.0},
+}
+
+
+class TokenBody(BaseModel):
+    persona: str = "guest"
+
+
+@app.get("/api/voice/personas")
+def voice_personas():
+    return {"personas": [{"id": k, **v} for k, v in VOICE_PERSONAS.items()],
+            "configured": bool(os.getenv("LIVEKIT_URL"))}
+
+
+@app.post("/api/voice/token")
+def voice_token(body: TokenBody):
+    url, key, secret = (os.getenv("LIVEKIT_URL"), os.getenv("LIVEKIT_API_KEY"),
+                        os.getenv("LIVEKIT_API_SECRET"))
+    if not all([url, key, secret]):
+        return {"error": "LiveKit not configured (set LIVEKIT_* in .env)"}
+    persona = VOICE_PERSONAS.get(body.persona, VOICE_PERSONAS["guest"])
+    meta = {k: persona[k] for k in
+            ("claimed_identity", "verification", "origin", "voice_anomaly", "verified_user_id")
+            if k in persona}
+    room = f"sentinel-{body.persona}-{uuid.uuid4().hex[:8]}"
+    from livekit import api as lk
+    token = (
+        lk.AccessToken(key, secret)
+        .with_identity(f"caller-{uuid.uuid4().hex[:6]}")
+        .with_name(persona["label"])
+        .with_grants(lk.VideoGrants(room_join=True, room=room))
+        .with_room_config(lk.RoomConfiguration(
+            agents=[lk.RoomAgentDispatch(agent_name="sentinel", metadata=json.dumps(meta))]))
+        .to_jwt()
+    )
+    return {"token": token, "url": url, "room": room, "persona": persona}
 
 
 @app.get("/api/scenarios")
