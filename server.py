@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from src.core import llm
 from src.core.cloudwatch import security_log
-from src.core.dashboard_bus import init_database_size, patch, register_broadcast, snapshot
+from src.core.dashboard_bus import emit, init_database_size, patch, register_broadcast, snapshot
 from src.core.graph_kb import KnowledgeGraph
 from src.core.retrieval import SentinelRetriever
 from src.core.session import SessionState
@@ -132,8 +132,51 @@ class StreamPushBody(BaseModel):
     immune_learned: Optional[Any] = None
     engines: Optional[list] = None
     consensus: Optional[dict] = None
+    verdict: Optional[str] = None
+    se_risk: Optional[int] = None
+    uncertainty: Optional[int] = None
+    anticipatory_forecast: Optional[Any] = None
+    transcript_lines: Optional[list] = None
     last_event: Optional[str] = None
     updated_at: Optional[float] = None
+
+
+class DashboardUpdateBody(BaseModel):
+    """Live metrics from the runtime pipeline (retrieval, demo_call, red team)."""
+    session_id: Optional[str] = None
+    transcript: Optional[str] = None
+    interim: Optional[str] = None
+    query: Optional[str] = None
+    trust_score: Optional[int] = None
+    se_risk: Optional[int] = None
+    uncertainty: Optional[int] = None
+    verdict: Optional[str] = None
+    decision: Optional[str] = None
+    threat_match: Optional[str] = None
+    response_latency_ms: Optional[float] = None
+    cache_status: Optional[str] = None
+    prefetch_entity: Optional[str] = None
+    voice_anomaly: Optional[float] = None
+    alert: Optional[str] = None
+
+
+def _apply_dashboard_metrics(data: dict) -> dict:
+    clean = {k: v for k, v in data.items() if v is not None}
+    if clean.get("decision") and not clean.get("verdict"):
+        clean["verdict"] = clean["decision"]
+    emit("pipeline_complete", **clean)
+    if clean.get("verdict") or clean.get("decision"):
+        emit("verdict",
+             decision=clean.get("verdict") or clean.get("decision"),
+             trust_score=clean.get("trust_score"),
+             response_latency_ms=clean.get("response_latency_ms"),
+             se_risk=clean.get("se_risk"),
+             uncertainty=clean.get("uncertainty"),
+             alert=clean.get("alert"))
+    patch(**{k: v for k, v in clean.items()
+             if k in snapshot() or k in ("verdict", "se_risk", "uncertainty",
+                                         "threat_match", "anticipatory_forecast")})
+    return clean
 
 
 @app.post("/api/stream/push")
@@ -142,8 +185,25 @@ async def stream_push(body: StreamPushBody):
     return {"ok": True}
 
 
+@app.post("/api/dashboard-update")
+async def dashboard_update(body: DashboardUpdateBody):
+    """Capture live pipeline metrics and broadcast to all dashboard clients."""
+    applied = _apply_dashboard_metrics(body.model_dump(exclude_none=True))
+    return {"ok": True, "applied": list(applied.keys())}
+
+
 @app.websocket("/api/ws/stream")
 async def ws_stream(websocket: WebSocket):
+    await _ws_dashboard_handler(websocket)
+
+
+@app.websocket("/api/ws/dashboard")
+async def ws_dashboard(websocket: WebSocket):
+    """Primary live dashboard WebSocket (alias of /api/ws/stream)."""
+    await _ws_dashboard_handler(websocket)
+
+
+async def _ws_dashboard_handler(websocket: WebSocket):
     await websocket.accept()
     _ws_clients.add(websocket)
     try:

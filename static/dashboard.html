@@ -29,6 +29,10 @@
   @keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
   .toast{ animation:slideUp .4s ease both }
   .trust-line{ transition:stroke .35s ease, stroke-width .35s ease }
+  .verdict-glow-allow{ box-shadow:0 0 40px rgba(52,211,153,.25), inset 0 0 30px rgba(52,211,153,.08) }
+  .verdict-glow-block{ box-shadow:0 0 50px rgba(244,63,94,.35), inset 0 0 40px rgba(244,63,94,.12) }
+  .forecast-predicted{ border-color:rgba(251,191,36,.45); background:rgba(251,191,36,.08) }
+  .forecast-confirmed{ border-color:rgba(52,211,153,.55); background:rgba(52,211,153,.15); box-shadow:0 0 30px rgba(52,211,153,.2) }
   .tab.active{ background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff }
   .fade{ animation:fade .35s ease both } @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
   ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:8px}
@@ -71,19 +75,36 @@
   <div id="toasts" class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm pointer-events-none"></div>
 
   <!-- ============ LIVE COMMAND CENTER (4 quadrants) ============ -->
-  <section id="tab-command" class="grid lg:grid-cols-2 gap-4">
+  <section id="tab-command">
+    <!-- Massive live verdict -->
+    <div id="cc-verdict-banner" class="glass rounded-2xl p-6 mb-4 text-center verdict-glow-allow transition-all duration-500">
+      <div class="text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-2">Live Firewall Verdict</div>
+      <div id="cc-verdict" class="text-5xl sm:text-6xl font-black tracking-tight text-emerald-400">ALLOW</div>
+      <div id="cc-verdict-sub" class="text-xs text-slate-400 mt-2 mono">awaiting pipeline execution…</div>
+    </div>
+
+  <div class="grid lg:grid-cols-2 gap-4">
     <!-- Q1: Live stream + trust chart + voice biometrics -->
-    <div class="glass rounded-2xl p-4 flex flex-col min-h-[340px]">
+    <div class="glass rounded-2xl p-4 flex flex-col min-h-[380px]">
       <div class="flex items-center justify-between mb-2">
         <h2 class="text-sm font-semibold text-slate-200">🎙️ Live Transcript & Trust Stream</h2>
         <span id="cc-ws" class="text-[10px] mono px-2 py-0.5 rounded bg-white/5 text-slate-500">ws …</span>
       </div>
-      <div id="cc-transcript" class="flex-1 rounded-xl bg-slate-900/60 border border-white/5 p-3 text-sm text-slate-300 min-h-[72px] leading-relaxed">
-        <span class="text-slate-500">Waiting for live speech… connect Live Voice or run a simulated call.</span>
+      <div id="cc-transcript-scroll" class="flex-1 rounded-xl bg-slate-900/60 border border-white/5 p-2 text-sm text-slate-300 min-h-[100px] max-h-[120px] overflow-y-auto space-y-1.5 mb-2">
+        <div class="text-slate-500 text-xs px-1">Waiting for live speech…</div>
+      </div>
+      <div id="cc-transcript" class="rounded-xl bg-slate-950/80 border border-cyan-500/20 p-2.5 text-sm text-cyan-100 min-h-[44px] leading-relaxed">
+        <span class="text-[10px] text-cyan-500/70 uppercase tracking-wider">interim · </span>
+        <span id="cc-interim-live" class="text-slate-500">listening…</span>
       </div>
       <div class="mt-3 mb-1 flex justify-between text-[10px] text-slate-500">
-        <span>SessionTrustScore (live)</span><span id="cc-trust-val" class="mono text-slate-300">100</span>
+        <span>SessionTrustScore</span><span id="cc-trust-val" class="mono text-slate-300">100</span>
       </div>
+      <div class="h-3 rounded-full bg-slate-700/50 overflow-hidden mb-2"><div id="cc-trust-bar" class="gauge h-full bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400" style="width:100%"></div></div>
+      <div class="mb-1 flex justify-between text-[10px] text-slate-500">
+        <span>Uncertainty / SE Risk</span><span id="cc-unc-val" class="mono text-amber-300">0</span>
+      </div>
+      <div class="h-2 rounded-full bg-slate-700/50 overflow-hidden mb-3"><div id="cc-unc-bar" class="gauge h-full bg-amber-500/80" style="width:0%"></div></div>
       <svg id="cc-trust-chart" viewBox="0 0 400 80" class="w-full h-20 rounded-lg bg-slate-900/40 border border-white/5" preserveAspectRatio="none">
         <line x1="0" y1="20" x2="400" y2="20" stroke="rgba(255,255,255,.06)" stroke-width="1"/>
         <line x1="0" y1="40" x2="400" y2="40" stroke="rgba(255,255,255,.06)" stroke-width="1"/>
@@ -96,9 +117,17 @@
       </div>
     </div>
 
-    <!-- Q2: Predictive pre-fetch -->
-    <div class="glass rounded-2xl p-4 min-h-[340px]">
+    <!-- Q2: Predictive pre-fetch + anticipatory forecast -->
+    <div class="glass rounded-2xl p-4 min-h-[380px]">
       <h2 class="text-sm font-semibold text-slate-200 mb-2">🏎 Predictive Pre-fetch Visualizer</h2>
+      <div id="cc-forecast" class="hidden rounded-xl px-4 py-3 mb-3 border-2 forecast-predicted transition-all duration-500">
+        <div class="text-[10px] uppercase tracking-[0.15em] text-amber-300 font-semibold mb-1">⚡ Anticipatory Forecast</div>
+        <div id="cc-forecast-phrase" class="text-lg font-bold text-white">"Keep this confidential"</div>
+        <div class="flex items-center justify-between mt-1">
+          <span id="cc-forecast-status" class="text-[11px] text-amber-200">Predicted next utterance</span>
+          <span id="cc-forecast-conf" class="text-xs mono text-amber-300">Confidence: 91%</span>
+        </div>
+      </div>
       <div id="cc-cache-pill" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs mono bg-slate-700/50 text-slate-400 mb-3">● Cold Base</div>
       <div id="cc-prefetch-banner" class="hidden rounded-xl px-3 py-2.5 mb-3 text-xs border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 flash"></div>
       <div id="cc-prefetch-hit" class="hidden rounded-xl px-3 py-2.5 mb-3 text-xs border border-emerald-500/30 bg-emerald-500/10 text-emerald-200"></div>
@@ -141,6 +170,7 @@
         <button id="cc-redteam" class="flex-1 glass hover:bg-white/10 rounded-xl px-3 py-2 text-xs text-slate-300">▶ Fire Red Team</button>
       </div>
     </div>
+  </div>
   </section>
 
   <!-- ============ FIREWALL CONSOLE ============ -->
@@ -571,15 +601,50 @@ function showToast(html, kind='learn'){
 function renderCommandCenter(s){
   if(!s||s.type==='ping') return;
   const interim=s.interim||'', final=s.transcript||'';
-  const live=interim||final;
-  if(live){
-    const tail=interim?`<span class="text-white">${final}</span><span class="text-cyan-300 animate-pulse">${interim}</span>`:
-      `<span class="text-white">${final}</span>`;
-    $('#cc-transcript').innerHTML=tail;
+  $('#cc-interim-live').innerHTML=interim?`<span class="text-cyan-200">${interim}</span>`:'<span class="text-slate-500">listening…</span>';
+  const lines=s.transcript_lines||[];
+  if(lines.length){
+    $('#cc-transcript-scroll').innerHTML=lines.map(l=>{
+      const vc=l.verdict==='BLOCK'?'text-rose-300':l.verdict==='REDACT'?'text-amber-300':'text-slate-300';
+      return `<div class="text-xs px-1 py-1 border-b border-white/5 ${vc}"><span class="text-slate-600 mono text-[10px]">${new Date(l.ts*1000).toLocaleTimeString()}</span> ${l.text}${l.verdict?` <span class="text-[10px] opacity-70">→ ${l.verdict}</span>`:''}</div>`;
+    }).join('');
+  } else if(final||interim){
+    $('#cc-transcript-scroll').innerHTML=`<div class="text-xs px-1 text-slate-300">${final}${interim?` <span class="text-cyan-400">${interim}</span>`:''}</div>`;
   }
   const ts=s.trust_score??100;
   $('#cc-trust-val').textContent=ts+'/100';
   $('#cc-trust-val').style.color=trustColor(ts);
+  $('#cc-trust-bar').style.width=ts+'%';
+  const unc=s.uncertainty??s.se_risk??0;
+  $('#cc-unc-val').textContent=unc+'/100';
+  $('#cc-unc-bar').style.width=unc+'%';
+
+  const ver=(s.verdict||'ALLOW').toUpperCase();
+  const vb=$('#cc-verdict-banner');
+  $('#cc-verdict').textContent=ver;
+  $('#cc-verdict').className='text-5xl sm:text-6xl font-black tracking-tight '+
+    (ver==='BLOCK'?'text-rose-400':ver==='REDACT'?'text-amber-400':'text-emerald-400');
+  vb.className='glass rounded-2xl p-6 mb-4 text-center transition-all duration-500 '+
+    (ver==='BLOCK'?'verdict-glow-block':ver==='REDACT'?'':'verdict-glow-allow');
+  const sub=[];
+  if(s.threat_match) sub.push('Threat: '+s.threat_match);
+  if(s.response_latency_ms!=null) sub.push('Latency: '+s.response_latency_ms+'ms');
+  if(s.cache_status) sub.push('Cache: '+s.cache_status);
+  $('#cc-verdict-sub').textContent=sub.join(' · ')||'pipeline idle';
+
+  const fc=s.anticipatory_forecast;
+  if(fc&&fc.phrase){
+    $('#cc-forecast').classList.remove('hidden');
+    $('#cc-forecast-phrase').textContent='"'+fc.phrase+'"';
+    $('#cc-forecast-conf').textContent='Confidence: '+(fc.confidence||91)+'%';
+    const confirmed=fc.status==='confirmed';
+    $('#cc-forecast').className='rounded-xl px-4 py-3 mb-3 border-2 transition-all duration-500 '+
+      (confirmed?'forecast-confirmed':'forecast-predicted');
+    $('#cc-forecast-status').textContent=confirmed
+      ?'✓ CONFIRMED — caller spoke the predicted phrase'
+      :`Predicted after "${fc.trigger||'wire/payroll/transfer'}" detected mid-utterance`;
+    $('#cc-forecast-status').className='text-[11px] '+(confirmed?'text-emerald-300 font-semibold':'text-amber-200');
+  }
   const hist=(s.trust_history||[]).slice(-40);
   if(hist.length){
     const pts=hist.map((p,i)=>{
@@ -663,7 +728,7 @@ function renderCommandCenter(s){
 function connectWS(){
   const proto=location.protocol==='https:'?'wss':'ws';
   try{
-    _ws=new WebSocket(`${proto}://${location.host}/api/ws/stream`);
+    _ws=new WebSocket(`${proto}://${location.host}/api/ws/dashboard`);
     _ws.onopen=()=>{$('#cc-ws').textContent='ws live';$('#cc-ws').className='text-[10px] mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300';};
     _ws.onmessage=e=>{ try{renderCommandCenter(JSON.parse(e.data));}catch(x){} };
     _ws.onclose=()=>{$('#cc-ws').textContent='ws reconnect…';$('#cc-ws').className='text-[10px] mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-300'; setTimeout(connectWS,2000);};

@@ -62,6 +62,8 @@ class SentinelPipeline:
                  intent: str = "read", raise_on_deny: bool = True) -> PipelineTurn:
         """Commit a final utterance and run the trust-gated retrieval."""
         session.commit_final(text)
+        # Look-ahead confirmation check on the committed utterance (dashboard only).
+        self.retriever.predictive._lookahead(session, text)
         query = text
         try:
             result = self.retriever.execute(

@@ -178,8 +178,43 @@ class SentinelRetriever:
                         breach=breach,
                     )
 
-        return RetrievalResult(
+        result = RetrievalResult(
             query=query, intent=intent, decision=overall,
             trust=asdict(trust), docs=[asdict(d) for d in docs],
             action=action, predictive=predictive, reasons=reasons,
         )
+        self._push_dashboard(session, query, trust, overall, predictive)
+        return result
+
+    def _push_dashboard(self, session, query: str, trust, decision: str,
+                        predictive: dict) -> None:
+        """Pipe live trust / threat / latency / verdict to the dashboard server."""
+        try:
+            from .dashboard_bus import push_dashboard_update
+            threat = trust.threat or {}
+            sem = threat.get("semantic") or {}
+            threat_match = ""
+            if sem.get("signature_id"):
+                sim = round(float(sem.get("score", 0)) * 100, 1)
+                threat_match = f"{sem.get('signature_id')} ({sim}% similarity)"
+            elif threat.get("attack_type") and threat.get("attack_type") != "none":
+                threat_match = str(threat.get("attack_type"))
+            uncertainty = min(100, int(trust.se_risk + session.voice_anomaly * 20))
+            push_dashboard_update({
+                "session_id": session.session_id,
+                "transcript": session.full_context() or query,
+                "query": query,
+                "trust_score": trust.score,
+                "se_risk": trust.se_risk,
+                "uncertainty": uncertainty,
+                "verdict": decision,
+                "decision": decision,
+                "threat_match": threat_match or None,
+                "response_latency_ms": predictive.get("lookup_ms"),
+                "cache_status": "warmed" if predictive.get("warm") else "cold",
+                "prefetch_entity": predictive.get("entity"),
+                "alert": (f"🚨 RED ALERT: Access Denied — {query[:72]}"
+                          if decision == "BLOCK" else None),
+            })
+        except Exception:
+            pass

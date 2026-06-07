@@ -32,6 +32,17 @@ ENTITY_MAP = {
 
 _ENTITY_RE = re.compile(r"\b(" + "|".join(map(re.escape, ENTITY_MAP)) + r")\b", re.IGNORECASE)
 
+# Lightweight look-ahead: financial trigger words predict a secrecy phrase the
+# caller often follows with (BEC / wire-fraud pattern). Presentation-only —
+# does not alter caching or trust scoring.
+_LOOKAHEAD_RE = re.compile(r"\b(wire|payroll|transfer)\b", re.IGNORECASE)
+_CONFIRM_RE = re.compile(
+    r"keep\s+this\s+confidential|keep\s+it\s+quiet|don'?t\s+tell|quietly",
+    re.IGNORECASE,
+)
+_FORECAST_PHRASE = "Keep this confidential"
+_FORECAST_CONFIDENCE = 91
+
 
 @dataclass
 class Prefetch:
@@ -78,7 +89,27 @@ class PredictiveRetriever:
             threading.Thread(
                 target=self._warm, args=(session, entity, query, pf), daemon=True
             ).start()
+        self._lookahead(session, interim_text)
         return triggered
+
+    def _lookahead(self, session, interim_text: str) -> None:
+        """Predict the next utterance fragment for the live dashboard only."""
+        text = interim_text or ""
+        if not text.strip():
+            return
+        try:
+            from .dashboard_bus import emit
+            if _CONFIRM_RE.search(text):
+                emit("forecast_confirmed", phrase=_FORECAST_PHRASE,
+                     confidence=_FORECAST_CONFIDENCE)
+                return
+            if _LOOKAHEAD_RE.search(text) and not getattr(session, "_forecast_emitted", False):
+                session._forecast_emitted = True
+                m = _LOOKAHEAD_RE.search(text)
+                emit("anticipatory_forecast", phrase=_FORECAST_PHRASE,
+                     confidence=_FORECAST_CONFIDENCE, trigger=m.group(1).lower())
+        except Exception:
+            pass
 
     @staticmethod
     def _entity_label(entity: str) -> str:

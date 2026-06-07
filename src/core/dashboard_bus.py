@@ -50,6 +50,11 @@ def _empty_state() -> dict:
         "immune_learned": None,
         "engines": [],
         "consensus": {},
+        "verdict": "ALLOW",
+        "se_risk": 0,
+        "uncertainty": 0,
+        "anticipatory_forecast": None,
+        "transcript_lines": [],
         "last_event": None,
         "updated_at": _now(),
     }
@@ -237,6 +242,8 @@ def emit(event: str, **data) -> None:
                 del alerts[_MAX_ALERTS:]
 
         elif event == "verdict":
+            if data.get("decision"):
+                _state["verdict"] = str(data["decision"]).upper()
             if data.get("decision") == "BLOCK":
                 msg = data.get("alert") or "🚨 RED ALERT: Access Denied"
                 alerts = _state.setdefault("active_alerts", [])
@@ -247,13 +254,98 @@ def emit(event: str, **data) -> None:
                 _trust_point(_state["trust_score"])
             if data.get("response_latency_ms") is not None:
                 _state["response_latency_ms"] = data["response_latency_ms"]
+            if data.get("se_risk") is not None:
+                _state["se_risk"] = int(data["se_risk"])
+                _state["uncertainty"] = int(data.get("uncertainty", data["se_risk"]))
+
+        elif event == "anticipatory_forecast":
+            _state["anticipatory_forecast"] = {
+                "phrase": data.get("phrase", "Keep this confidential"),
+                "confidence": int(data.get("confidence", 91)),
+                "status": "predicted",
+                "trigger": data.get("trigger", ""),
+                "ts": _now(),
+            }
+
+        elif event == "forecast_confirmed":
+            fc = _state.get("anticipatory_forecast") or {}
+            fc.update(
+                phrase=data.get("phrase", fc.get("phrase", "Keep this confidential")),
+                confidence=int(data.get("confidence", fc.get("confidence", 91))),
+                status="confirmed",
+                ts=_now(),
+            )
+            _state["anticipatory_forecast"] = fc
+
+        elif event == "pipeline_complete":
+            for key in ("verdict", "trust_score", "se_risk", "uncertainty",
+                        "threat_match", "response_latency_ms", "cache_status",
+                        "transcript", "interim", "session_id"):
+                if data.get(key) is not None:
+                    _state[key] = data[key]
+            if data.get("trust_score") is not None:
+                _trust_point(int(data["trust_score"]))
+            line = (data.get("transcript") or data.get("query") or "").strip()
+            if line:
+                lines = _state.setdefault("transcript_lines", [])
+                if not lines or lines[0].get("text") != line:
+                    lines.insert(0, {"text": line, "ts": _now(),
+                                     "verdict": data.get("verdict", "")})
+                    del lines[30:]
 
         # merge any extra scalar fields
         for k, v in data.items():
-            if k in ("engines", "consensus") and v:
+            if k in ("engines", "consensus", "anticipatory_forecast") and v:
                 _state[k] = v
 
     _notify()
+
+
+def _fallback_log(metrics: dict, err: str) -> None:
+    """Local log when the dashboard server is unreachable (offline CLI demos)."""
+    try:
+        import json
+        row = {"ts": _now(), "metrics": metrics, "error": err}
+        with open("dashboard_events.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, default=str) + "\n")
+    except Exception:
+        pass
+
+
+def push_dashboard_update(metrics: dict) -> bool:
+    """Pipe live pipeline variables to the dashboard (in-process or HTTP POST).
+
+    When the FastAPI server is running in-process, state patches broadcast over
+    WebSocket immediately. Otherwise POSTs to /api/dashboard-update and falls back
+    to dashboard_events.jsonl if the server is down.
+    """
+    emit("pipeline_complete", **metrics)
+    if metrics.get("decision") or metrics.get("verdict"):
+        emit("verdict",
+             decision=metrics.get("verdict") or metrics.get("decision"),
+             trust_score=metrics.get("trust_score"),
+             response_latency_ms=metrics.get("response_latency_ms"),
+             se_risk=metrics.get("se_risk"),
+             uncertainty=metrics.get("uncertainty"),
+             alert=metrics.get("alert"))
+    if os.getenv("SENTINEL_DASHBOARD_SERVER") == "1":
+        return True
+    url = os.getenv(
+        "SENTINEL_DASHBOARD_URL",
+        "http://127.0.0.1:8000/api/dashboard-update",
+    )
+    try:
+        import json
+        import urllib.request
+        req = urllib.request.Request(
+            url, data=json.dumps(metrics).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        urllib.request.urlopen(req, timeout=0.5)
+        return True
+    except Exception as exc:
+        _fallback_log(metrics, str(exc))
+        return False
 
 
 def init_database_size(n: int) -> None:
