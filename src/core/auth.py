@@ -109,7 +109,14 @@ def _public_user(user: dict) -> dict:
         "role": user["role"],
         "org": user.get("org", ""),
         "title": user.get("title", ""),
+        "onboarded": bool(user.get("onboarded")),
     }
+
+
+def complete_onboarding(user_id: str) -> dict:
+    db.set_user_onboarded(user_id)
+    user = db.get_user(user_id)
+    return {"user": _public_user(user)} if user else {"error": "not found"}
 
 
 def demo_accounts_public() -> list:

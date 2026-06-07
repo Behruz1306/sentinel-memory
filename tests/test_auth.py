@@ -14,10 +14,10 @@ def tmp_db(monkeypatch):
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     monkeypatch.setenv("SENTINEL_DB_PATH", path)
-    import src.core.persistence as db
-    db._conn = None
+    import src.core.sqlite_store as sqlite_store
+    sqlite_store.reset_connection()
     yield
-    db._conn = None
+    sqlite_store.reset_connection()
     try:
         os.unlink(path)
     except OSError:

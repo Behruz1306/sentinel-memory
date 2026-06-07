@@ -25,3 +25,6 @@ livekit-api>=1.1
 # Workspace: PDF ingest (Unsiloed) + PDF session reports.
 requests>=2.31
 fpdf2>=2.7
+
+# Cloud persistence (Supabase PostgreSQL).
+supabase>=2.4

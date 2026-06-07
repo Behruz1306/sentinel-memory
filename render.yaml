@@ -34,3 +34,7 @@ services:
         sync: false
       - key: LIVEKIT_API_SECRET
         sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false

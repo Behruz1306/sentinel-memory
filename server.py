@@ -129,7 +129,7 @@ def health():
         "breach_sink": security_log.sink,
         "kb": _kb.stats(),
         "threat_memory": threat_memory.stats(),
-        "persistence": db.stats(),
+        "persistence": {**db.stats(), "backend": db.backend_name()},
         "stream": snapshot(),
     }
 
@@ -275,13 +275,14 @@ def evaluate(body: EvalBody):
     return result.to_dict()
 
 
-@app.post("/api/compare")
-def compare(body: EvalBody):
-    """Naive similarity-only RAG vs Sentinel — the core thesis, side by side.
+class CompareBody(EvalBody):
+    company_id: str = "acme-logistics"
 
-    `naive` is what a vanilla RAG agent would feed its LLM: the top semantic
-    hits in full, sensitivity ignored. `sentinel` is the trust-gated result.
-    """
+
+@app.post("/api/compare")
+def compare(body: CompareBody):
+    """Naive similarity-only RAG vs Sentinel — the core thesis, side by side."""
+    kb = kb_registry.get(body.company_id)
     s = SessionState(
         session_id="cmp", caller_id="api",
         claimed_identity=body.claimed_identity, verification=body.verification,
@@ -290,15 +291,30 @@ def compare(body: EvalBody):
     )
     if body.transcript:
         s.commit_final(body.transcript)
-    sentinel = _retriever.execute(s, body.query, intent=body.intent, raise_on_deny=False)
-    naive_hits = _retriever._retrieve(body.query, 4) or []
+    cloud = _cloud_deploy()
+    sentinel = _retriever.execute(
+        s, body.query, intent=body.intent, raise_on_deny=False,
+        use_llm=not cloud, kb=kb,
+    )
+    naive_hits = kb.retrieve(body.query, 4) or []
     naive = [
         {"title": doc.title, "sensitivity": doc.sensitivity,
          "leaked": doc.sensitivity in ("CONFIDENTIAL", "RESTRICTED", "FINANCIAL"),
-         "served": doc.content}
+         "served": (doc.content or "")[:500]}
         for doc, _ in naive_hits
     ]
-    return {"naive": naive, "sentinel": sentinel.to_dict()}
+    leaked = sum(1 for n in naive if n["leaked"])
+    return {
+        "company_id": body.company_id,
+        "query": body.query,
+        "naive": naive,
+        "naive_leaked_count": leaked,
+        "sentinel": sentinel.to_dict(),
+        "summary": (
+            f"Naive RAG would leak {leaked} sensitive doc(s). "
+            f"Sentinel verdict: {sentinel.decision} (trust {sentinel.trust.get('score', 0)})."
+        ),
+    }
 
 
 @app.post("/api/simulate/{call_id}")
@@ -468,6 +484,14 @@ def auth_me(request: Request):
     if not user:
         return {"error": "not authenticated"}
     return {"user": user}
+
+
+@app.post("/api/auth/onboarding-complete")
+def auth_onboarding_complete(request: Request):
+    user = _user_from_request(request)
+    if not user:
+        return {"error": "login required"}
+    return auth_mod.complete_onboarding(user["id"])
 
 
 @app.get("/api/auth/demo-accounts")
